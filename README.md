@@ -7,13 +7,15 @@ Translate raw Japanese manga → English. One app, two phases:
 
 ## Status
 
-**v0.5.0** — translation pipeline works end-to-end (detect → OCR → translate):
+**v0.6.0** — full pipeline runs end-to-end on a page (detect → OCR → translate → inpaint → typeset):
 
-- **Detect** — PP-OCRv5 server det (Apache-2.0, ONNX via onnxruntime) + a classical CV vertical-kernel safety net; recovers handwritten / free-floating vertical text that document-tuned detectors miss.
-- **OCR** — manga-ocr (Apache-2.0), reads vertical (縦書き) text natively.
+- **Detect** — PP-OCRv5 server det (Apache-2.0, ONNX) + classical CV vertical-kernel safety net.
+- **OCR** — manga-ocr (Apache-2.0), vertical (縦書き) native.
 - **Translate** — OpenRouter, batched JP→EN.
+- **Inpaint** — LaMa (Apache-2.0) erases the original text.
+- **Typeset** — English re-lettered into each box, sized/wrapped to fit.
 
-Still to build: inpaint (LaMa), typeset, web UI, batch/state, deploy.
+Still to build: web UI, batch/state, deploy. Known limits: bubble-aware typesetting (English in narrow vertical bubbles stacks into many short lines), furigana re-separation under PP-OCRv5 boxes.
 
 ## What it will do (per page / feature)
 

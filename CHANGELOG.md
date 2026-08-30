@@ -2,6 +2,18 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.6.0] - 2026-08-30
+
+### Added
+
+- Inpaint (`app/pipeline/inpaint.py`): LaMa (Apache-2.0, via `simple-lama-inpainting`) erases original text with a solid dilated-box mask.
+- Typeset (`app/pipeline/typeset.py`): re-letters English into each box — largest font that fits, word-wrapped, centered. Measurement uses `multiline_textbbox` so it matches actual rendering (no self-overlap).
+- End-to-end render (`app/pipeline/render.py`): `render_translated_page()` composes detect → OCR → translate → inpaint → typeset.
+
+### Changed
+
+- Detection: drop isolated single-character OCR results (e.g. an eye read as "し") — artwork noise, never dialogue.
+
 ## [0.5.0] - 2026-08-30
 
 ### Changed

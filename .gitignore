@@ -27,3 +27,6 @@ scripts/
 .DS_Store
 .idea/
 .vscode/
+
+# Generated output (translated/annotated pages — copyrighted source material)
+output/

@@ -68,6 +68,10 @@ def process_page(image_path: str) -> list[TextBlock]:
         text, conf = ocr_crop(image, (x, y, w, h))
         if not text:
             continue
+        if len(text) <= 1:
+            # Isolated single kana = artwork noise (e.g. an eye OCR'd as "し"), not
+            # dialogue. A real lone kana would be SFX, which v1 leaves as-is anyway.
+            continue
         if w < 15 and h > w * 2:
             orientation = "furigana"  # narrow ruby column beside kanji
         elif h > w * 1.5:
