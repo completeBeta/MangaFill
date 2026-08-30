@@ -1,6 +1,6 @@
 [project]
 name = "manga-fill"
-version = "0.1.0"
+version = "0.2.0"
 description = "Translate raw Japanese manga to English — detect → OCR → translate → inpaint → typeset."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,9 +18,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Heavy ML deps are added per-milestone (they pull torch, large + slow to build):
-#   Milestone 2 (detect + OCR): manga-ocr, torch, torchvision
-#   Milestone 4 (inpaint):       lama-cleaner (or opencv + lama weights)
+# Heavy ML deps (pull torch — install torch CPU-only separately, see Dockerfile).
+ml = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "manga-ocr>=0.1.16",
+    "rapidocr_onnxruntime>=1.3",
+    "onnxruntime>=1.16",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
