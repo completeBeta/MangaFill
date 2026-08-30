@@ -11,8 +11,9 @@ class TextBlock:
     box: list = field(default_factory=list)   # 4-point polygon [[x,y], ...]
     bbox: tuple = (0, 0, 0, 0)                 # (x, y, w, h) axis-aligned crop
     text: str = ""                             # JP text (manga-ocr output)
+    translation: str = ""                      # EN translation (LLM output)
     confidence: float | None = None
-    orientation: str = "horizontal"            # horizontal | vertical
+    orientation: str = "horizontal"            # horizontal | vertical | furigana
 
 
 def polygon_to_bbox(box: list) -> tuple:
