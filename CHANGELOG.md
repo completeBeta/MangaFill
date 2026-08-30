@@ -2,6 +2,14 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.3.0] - 2026-08-30
+
+### Changed
+
+- Detection hardened to a hybrid ensemble: RapidOCR (PP-OCR det) + classical CV (adaptive threshold + vertical-line morphology). Catches vertical manga columns the document-tuned detector missed (`死んでも`, `ライクネル`, `そんなに`).
+- Block classification: vertical / horizontal / furigana; vertical columns re-merged right-to-left; furigana kept separate; watermarks/titles flagged horizontal.
+- ~81% recall on the 3 real JP fixtures (up from ~50%). Remaining gaps: one long-line prefix column + two handwritten lines.
+
 ## [0.2.0] - 2026-08-30
 
 ### Added

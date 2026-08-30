@@ -27,7 +27,7 @@ class Settings(BaseSettings):
 
     # Translation (cloud-only, no local GPU)
     openrouter_api_key: str = ""
-    openrouter_model: str = "google/gemini-2.0-flash"
+    openrouter_model: str = "meta-llama/llama-3.1-8b-instruct"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     deepseek_api_key: str = ""
 

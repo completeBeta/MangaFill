@@ -2,17 +2,19 @@
 
 Headless — no FastAPI imports, so it's testable without a server.
 
-Manga text is predominantly VERTICAL (縦書き), and the detector splits a single
-vertical line into per-column boxes (right-to-left). We re-merge columns that
-belong to the same line (vertically overlapping + horizontally adjacent), join
-their text right-to-left, and sort the final blocks top-to-bottom / right-to-left.
+Detection (see detect.py) returns boxes; manga-ocr OCRs each crop. Blocks are
+classed vertical / horizontal / furigana. Vertical columns the detector split are
+re-merged right-to-left. Furigana (narrow ruby columns beside kanji) is kept
+separate so it is not folded into the main text. Horizontal text (titles /
+watermarks) is kept but flagged — it is not translated (titles stay as-is,
+watermarks are skipped).
 """
 from __future__ import annotations
 
 from .detect import detect_boxes
 from .ingest import load_image
 from .ocr import ocr_crop
-from .types import TextBlock, polygon_to_bbox
+from .types import TextBlock
 
 
 def _merge_vertical_lines(blocks: list[TextBlock]) -> list[TextBlock]:
@@ -41,8 +43,7 @@ def _merge_vertical_lines(blocks: list[TextBlock]) -> list[TextBlock]:
                     group.append(bj)
                     used[j] = True
 
-        # within a line, read right-to-left (x descending)
-        group.sort(key=lambda b: -b.bbox[0])
+        group.sort(key=lambda b: -b.bbox[0])  # right-to-left
         text = "".join(b.text for b in group)
         xs = [b.bbox[0] for b in group]
         ys = [b.bbox[1] for b in group]
@@ -63,16 +64,27 @@ def process_page(image_path: str) -> list[TextBlock]:
     boxes = detect_boxes(image)
 
     blocks: list[TextBlock] = []
-    for box in boxes:
-        bbox = polygon_to_bbox(box)
-        text, conf = ocr_crop(image, bbox)
-        x, y, w, h = bbox
-        orientation = "vertical" if h > w * 1.5 else "horizontal"
+    for (x, y, w, h) in boxes:
+        text, conf = ocr_crop(image, (x, y, w, h))
+        if not text:
+            continue
+        if w < 15 and h > w * 2:
+            orientation = "furigana"  # narrow ruby column beside kanji
+        elif h > w * 1.5:
+            orientation = "vertical"
+        else:
+            orientation = "horizontal"
         blocks.append(
-            TextBlock(box=box, bbox=bbox, text=text, confidence=conf, orientation=orientation)
+            TextBlock(bbox=(x, y, w, h), text=text, confidence=conf, orientation=orientation)
         )
 
-    merged = _merge_vertical_lines(blocks)
+    furigana = [b for b in blocks if b.orientation == "furigana"]
+    vertical = [b for b in blocks if b.orientation == "vertical"]
+    horizontal = [b for b in blocks if b.orientation == "horizontal"]
+
+    merged = _merge_vertical_lines(vertical)
     # reading order: top-to-bottom, then right-to-left within a row
     merged.sort(key=lambda b: (b.bbox[1], -b.bbox[0]))
-    return merged
+    furigana.sort(key=lambda b: (b.bbox[1], -b.bbox[0]))
+    horizontal.sort(key=lambda b: (b.bbox[1], -b.bbox[0]))
+    return merged + furigana + horizontal
