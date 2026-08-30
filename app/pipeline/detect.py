@@ -1,15 +1,14 @@
-"""Text detection — hybrid ensemble (RapidOCR + classical CV).
+"""Text detection — PP-OCRv5 server det (ONNX) + classical CV safety net.
 
-Manga text is predominantly VERTICAL, high-contrast, and inside bubbles. A single
-detector is not enough: the document-tuned PP-OCR det (RapidOCR) misses stylised
-action text, while a *square* morphological kernel merges text into dark artwork.
+Manga text is predominantly VERTICAL, high-contrast, and inside bubbles. The
+document-tuned PP-OCRv4 det (RapidOCR) missed stylised action text and free-floating
+handwritten lines, so the neural detector is upgraded to **PP-OCRv5_server_det**
+(Apache-2.0, PP-HGNetV2 backbone) running via onnxruntime — no PaddlePaddle native
+inference (which is broken on CPU here). A classical CV pass with a vertical-line
+kernel stays as a cheap safety net for vertical columns the neural detector still
+misses (e.g. free-floating editorial text).
 
-So we ensemble:
-  1. RapidOCR (PP-OCR det via onnxruntime) — standard text.
-  2. Classical CV with a VERTICAL-line kernel (1,25) — vertical manga columns
-     (catches text the doc detector misses, e.g. small/action text).
-  3. Classical CV with a HORIZONTAL-line kernel (25,1) — horizontal text/titles.
-  → union + greedy NMS (keep larger boxes; prefers merged CV lines over fragments).
+  PP-OCRv5_server_det boxes ∪ CV boxes → greedy NMS (larger boxes win).
 
 Returns (x, y, w, h) boxes. manga-ocr OCRs each crop afterwards.
 """
@@ -17,24 +16,29 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
-from rapidocr_onnxruntime import RapidOCR
 
-_engine: RapidOCR | None = None
+_engine = None
 
 
-def _get_engine() -> RapidOCR:
+def _get_engine():
     global _engine
     if _engine is None:
-        _engine = RapidOCR(det_box_thresh=0.3)
+        # Lazy import: paddleocr pulls in paddlepaddle (~2-3s import). The ONNX
+        # engine means inference runs on onnxruntime, not the broken PaddlePaddle CPU
+        # native path.
+        from paddleocr import TextDetection
+
+        _engine = TextDetection(model_name="PP-OCRv5_server_det", engine="onnxruntime")
     return _engine
 
 
-def _rapidocr_boxes(image: np.ndarray) -> list[tuple]:
-    result, _ = _get_engine()(image)
+def _ppocrv5_boxes(image: np.ndarray) -> list[tuple]:
+    result = _get_engine().predict(image, batch_size=1)
+    polys = result[0].json["res"].get("dt_polys", [])
     out: list[tuple] = []
-    for box, _text, _score in result:
-        xs = [p[0] for p in box]
-        ys = [p[1] for p in box]
+    for p in polys:
+        xs = [pt[0] for pt in p]
+        ys = [pt[1] for pt in p]
         out.append(
             (int(min(xs)), int(min(ys)), int(max(xs) - min(xs)), int(max(ys) - min(ys)))
         )
@@ -89,7 +93,7 @@ def _nms(boxes: list[tuple], iou_thresh: float = 0.3) -> list[tuple]:
 def detect_boxes(image: np.ndarray) -> list[tuple]:
     """Return a deduplicated list of (x, y, w, h) text-region boxes."""
     boxes: list[tuple] = []
-    boxes += _rapidocr_boxes(image)
+    boxes += _ppocrv5_boxes(image)
     boxes += _cv_boxes(image, ksize=(1, 25))  # vertical manga columns
     # NOTE: a horizontal kernel was tried and rejected — it slices vertical text
     # into horizontal strips (noise). Horizontal text (titles/watermarks) is

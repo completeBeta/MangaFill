@@ -7,7 +7,13 @@ Translate raw Japanese manga → English. One app, two phases:
 
 ## Status
 
-**v0.1.0** — scaffold only. The pipeline is not implemented yet.
+**v0.5.0** — translation pipeline works end-to-end (detect → OCR → translate):
+
+- **Detect** — PP-OCRv5 server det (Apache-2.0, ONNX via onnxruntime) + a classical CV vertical-kernel safety net; recovers handwritten / free-floating vertical text that document-tuned detectors miss.
+- **OCR** — manga-ocr (Apache-2.0), reads vertical (縦書き) text natively.
+- **Translate** — OpenRouter, batched JP→EN.
+
+Still to build: inpaint (LaMa), typeset, web UI, batch/state, deploy.
 
 ## What it will do (per page / feature)
 
@@ -21,7 +27,7 @@ Translate raw Japanese manga → English. One app, two phases:
 - Input: **web upload** (no watch-dir / Suwayomi integration in v1).
 - Automation: **fully automatic, one-shot** — no review step in v1.
 - Output: user-selectable; **default = leave-as-is** (no auto re-assembly); CBZ re-assembly is opt-in.
-- Translation: **cloud-only via OpenRouter**, model configurable (default start: Gemini Flash). No local-GPU translation.
+- Translation: **cloud-only via OpenRouter**, model configurable (default: `meta-llama/llama-3.1-8b-instruct`). No local-GPU translation.
 - Vision GPU: on the homelab GPU host (reserved for inpaint/detect/colour), wired later as a remote worker.
 
 ## Run

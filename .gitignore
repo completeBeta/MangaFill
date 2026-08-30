@@ -20,6 +20,9 @@ venv/
 # Local git credential cache
 .git-credentials
 
+# Scratch eval scripts (reference local fixture paths outside the repo)
+scripts/
+
 # Editor/OS
 .DS_Store
 .idea/
