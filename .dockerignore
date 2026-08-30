@@ -1,0 +1,15 @@
+.git
+.gitignore
+.dockerignore
+.venv
+__pycache__
+*.pyc
+.env
+config
+data
+uploads
+fonts/*.ttf
+fonts/*.otf
+tests
+*.db
+.pytest_cache

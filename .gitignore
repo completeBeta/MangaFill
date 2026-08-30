@@ -1,0 +1,26 @@
+# Secrets — NEVER commit
+.env
+config.yaml
+config/*.yaml
+
+# Runtime data
+data/
+uploads/
+*.db
+*.sqlite
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Local git credential cache
+.git-credentials
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
