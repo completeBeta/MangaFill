@@ -25,12 +25,13 @@ pipeline:
     max_scale_down_steps: 6
 
 translation:                 # CLOUD ONLY — no local GPU. Model is configurable.
-  gateway: openrouter
-  model: meta-llama/llama-3.1-8b-instruct   # initial model (johnnyk's pick)
-  candidates:                # A/B in milestone 3 — keep whichever translates best
+  gateway: deepseek
+  model: deepseek-v4-flash   # primary (2026-08-31) — fixes dialogue errors, cheap/fast
+  base_url: https://api.deepseek.com/v1
+  candidates:                # A/B pool — keep whichever translates best
+    - deepseek-v4-flash
     - meta-llama/llama-3.1-8b-instruct
     - google/gemini-2.0-flash
-    - deepseek/deepseek-chat
   max_retries: 3
 
 output:

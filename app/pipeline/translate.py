@@ -16,9 +16,10 @@ from .types import TextBlock
 SYSTEM_PROMPT = (
     "You are a professional manga translator. Translate each numbered Japanese "
     "line to natural, concise English that fits a speech bubble. Preserve tone "
-    "(casual/formal/angry) and speaker consistency. Output ONLY numbered lines "
-    "in the exact format 'N. <translation>', one per line. No preamble, no "
-    "explanations, no extra text."
+    "(casual/formal/angry) and speaker consistency. Sound effects (onomatopoeia): "
+    "give a brief English equivalent or transliteration (e.g. おえっぷ -> 'Gagh'), "
+    "not dialogue. Output ONLY numbered lines in the exact format 'N. <translation>', "
+    "one per line. No preamble, no explanations, no extra text."
 )
 
 
@@ -45,23 +46,31 @@ def translate_lines(
     user = "Translate these manga lines:\n" + "\n".join(
         f"{i + 1}. {t}" for i, t in enumerate(lines)
     )
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user},
+        ],
+        "max_tokens": 4000,
+        "temperature": 0.2,
+    }
+    # DeepSeek v4 models reason by default, but translation needs none of it:
+    # the chain-of-thought burns the max_tokens budget and returns EMPTY content
+    # on larger batches (finish_reason=length, reasoning_tokens=max_tokens).
+    # Disable reasoning explicitly.
+    if model.lower().startswith("deepseek"):
+        payload["thinking"] = {"type": "disabled"}
+
     resp = httpx.post(
         f"{base_url}/chat/completions",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={
-            "model": model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user},
-            ],
-            "max_tokens": 4000,
-            "temperature": 0.2,
-        },
+        json=payload,
         timeout=120,
     )
     resp.raise_for_status()
     data = resp.json()
-    content = data["choices"][0]["message"]["content"]
+    content = data["choices"][0]["message"].get("content") or ""
     cost = data.get("usage", {}).get("cost", 0.0)
 
     translations = _parse_numbered(content, len(lines))

@@ -25,11 +25,15 @@ class Settings(BaseSettings):
     target_lang: str = "en"
     device: str = "cpu"
 
-    # Translation (cloud-only, no local GPU)
+    # Translation (cloud-only, no local GPU). DeepSeek v4-flash is primary
+    # (switched 2026-08-31 — fixes dialogue errors, cheaper); OpenRouter is the
+    # fallback. DeepSeek v4 models reason by default — translate.py disables it.
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
     openrouter_api_key: str = ""
     openrouter_model: str = "meta-llama/llama-3.1-8b-instruct"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    deepseek_api_key: str = ""
 
     # Storage
     state_db: str = "/data/mangafill.db"

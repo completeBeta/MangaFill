@@ -2,6 +2,22 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.7.0] - 2026-08-31
+
+### Added
+- **Trained text/bubble detector** (`app/pipeline/detector.py`) — ogkalu RT-DETR-v2 (Apache-2.0) replaces the white-flood-fill bubble heuristic and PP-OCRv5 text detection; returns `bubble` / `text_bubble` / `text_free` in one pass.
+- **Free-text translation** — narration boxes, handwritten mutters, and SFX (`text_free`) are now OCR'd + translated + re-lettered instead of left as-is. Only pure-ASCII watermarks/page numbers are skipped.
+
+### Changed
+- **Translation: DeepSeek `deepseek-v4-flash`** (was OpenRouter Llama 3.1 8B) — fixes dialogue errors ("You're Izumo... right?" vs "You're really something") and is cheaper. Runtime-configurable via `MANGAFILL_MODEL` / `MANGAFILL_BASE_URL`.
+- **Uniform lettering size** — dialogue renders at a consistent page-wide size (~1/48 page width); shrink-to-fit only on overflow. Fixes short lines blowing up to fill big bubbles.
+- **Native-resolution inpaint** — LaMa crops + composites only the erased text regions at full resolution instead of downscaling the whole page. Every pixel outside the erased text is byte-identical to the source.
+- **Lower detection threshold (0.4 → 0.2)** — catches tiny single-character SFX (ほえ, コヒュ); the OCR + Japanese-content filter rejects false positives.
+
+### Fixed
+- **DeepSeek empty-content bug** — v4 models reason by default, burning the `max_tokens` budget and returning empty content on large batches. Fixed by sending `thinking: {"type": "disabled"}`.
+- **Duplicate detections** — the detector double-fires some regions; dedup via IoU.
+
 ## [0.6.1] - 2026-08-31
 
 ### Added

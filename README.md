@@ -29,7 +29,7 @@ Still to build: web UI, batch/state, deploy. Known limits: bubble-aware typesett
 - Input: **web upload** (no watch-dir / Suwayomi integration in v1).
 - Automation: **fully automatic, one-shot** — no review step in v1.
 - Output: user-selectable; **default = leave-as-is** (no auto re-assembly); CBZ re-assembly is opt-in.
-- Translation: **cloud-only via OpenRouter**, model configurable (default: `meta-llama/llama-3.1-8b-instruct`). No local-GPU translation.
+- Translation: **cloud-only via DeepSeek** (`deepseek-v4-flash` default), runtime-configurable via `MANGAFILL_MODEL`/`MANGAFILL_BASE_URL`. No local-GPU translation.
 - Vision GPU: on the homelab GPU host (reserved for inpaint/detect/colour), wired later as a remote worker.
 
 ## Run
