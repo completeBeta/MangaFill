@@ -72,7 +72,7 @@ def process_page(image_path: str) -> list[TextBlock]:
             # Isolated single kana = artwork noise (e.g. an eye OCR'd as "し"), not
             # dialogue. A real lone kana would be SFX, which v1 leaves as-is anyway.
             continue
-        if w < 15 and h > w * 2:
+        if w <= 16 and h > w * 2:
             orientation = "furigana"  # narrow ruby column beside kanji
         elif h > w * 1.5:
             orientation = "vertical"

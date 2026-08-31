@@ -72,10 +72,17 @@ def _draw_box(draw: ImageDraw.ImageDraw, bbox: tuple, text: str, font_path: str 
     if not font_path:
         return
     x, y, w, h = bbox
-    fitted = _fit(text, w - 4, h - 4, font_path)
+    pad = 4
+    max_w = max(w - 2 * pad, 1)
+    max_h = max(h - 2 * pad, 1)
+    fitted = _fit(text, max_w, max_h, font_path)
     if fitted is None:
-        return
-    _size, lines, font = fitted
+        # Fallback: smallest size, wrap to width, allow overflow. A slightly
+        # overflowing line beats a silently blank bubble.
+        font = ImageFont.truetype(font_path, 8)
+        lines = _wrap(draw, text, font, max_w)
+    else:
+        _size, lines, font = fitted
     draw.multiline_text(
         (x + w // 2, y + h // 2),
         "\n".join(lines),
@@ -87,19 +94,34 @@ def _draw_box(draw: ImageDraw.ImageDraw, bbox: tuple, text: str, font_path: str 
     )
 
 
-def typeset_page(image: Image.Image, blocks: list[TextBlock], font_path: str | None = None) -> Image.Image:
+def typeset_page(
+    image: Image.Image,
+    blocks: list[TextBlock],
+    font_path: str | None = None,
+    regions: dict | None = None,
+    only: set | None = None,
+) -> Image.Image:
     """Draw every translatable block's English translation into a copy of `image`.
 
     Furigana (ruby) and untranslated blocks (titles/SFX/watermarks) are skipped:
     furigana is erased, not re-lettered; SFX/titles stay as-is.
+
+    `regions` optionally maps id(block) -> (x, y, w, h) container (the bubble/box
+    interior) to draw into. When omitted, each block's own bbox is used.
+
+    `only` optionally restricts drawing to a set of block ids (e.g. blocks the
+    caller decided to typeset, excluding free-floating text left untouched).
     """
     out = image.copy()
     draw = ImageDraw.Draw(out)
     fp = font_path or _find_font()
     for b in blocks:
+        if only is not None and id(b) not in only:
+            continue
         if b.orientation == "furigana":
             continue
         if not b.translation:
             continue
-        _draw_box(draw, b.bbox, b.translation, fp)
+        region = regions.get(id(b), b.bbox) if regions else b.bbox
+        _draw_box(draw, region, b.translation, fp)
     return out

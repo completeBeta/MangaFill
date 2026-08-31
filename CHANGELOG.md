@@ -2,6 +2,19 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.6.1] - 2026-08-31
+
+### Added
+
+- Bubble detection (`app/pipeline/bubble.py`): recovers each text block's enclosing white speech-bubble / caption-box via a bounded, seed-based flood fill. Guards (min area, overlap, width/height caps, boundary-touch) reject gutter leaks and free-floating text.
+
+### Fixed
+
+- **Blank speech bubbles** — English was re-lettered into the narrow *vertical text column*, which horizontal English can't fit, so `_fit` gave up and drew nothing. Typesetting is now bubble-aware: text is re-lettered into the recovered bubble interior (e.g. Game of Familia's "オード＝シーカ殿…", "御覧の通り…", "あとは…" bubbles now render).
+- **Misaligned / garbage text over artwork** — free-floating editorial text (e.g. the 「◎ダバ国を平定…」 teaser over the tower, OCR'd as garbage) was in-painted and re-lettered over the art. Free-floating text (no white container) is now left untouched: its Japanese stays, nothing is drawn over it.
+- **Furigana misclassification** — narrow ruby columns up to 16px wide (e.g. 「まほうこっか」) are now classed as furigana instead of vertical dialogue, so they're erased but not re-lettered.
+- **Typeset fallback** — a translation that can't fit its box at any size now falls back to a minimum 8px font (slight overflow) instead of silently leaving a blank bubble.
+
 ## [0.6.0] - 2026-08-30
 
 ### Added
