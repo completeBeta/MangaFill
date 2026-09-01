@@ -1,44 +1,30 @@
-"""Settings endpoints — read/write the persisted output-mode (and surface config)."""
+"""Settings endpoints — read/write the persisted runtime settings.
+
+Model / base URL / API keys / dry-run / output mode are editable here; the
+worker reads the same store, so changes take effect on the next job.
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.config import settings as cfg
 from app.db import get_db
-from app.models import Setting
+from app.settings_store import get_all, set_setting
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
-
-_PERSISTED = {"output_mode"}
-
-
-def _read(db: Session, key: str, default: str) -> str:
-    s = db.get(Setting, key)
-    return s.value if s else default
 
 
 @router.get("")
 def get_settings(db: Session = Depends(get_db)):
-    return {
-        "output_mode": _read(db, "output_mode", "folder"),
-        "model": cfg.deepseek_model,
-        "base_url": cfg.deepseek_base_url,
-        "dry_run": cfg.dry_run,
-    }
+    return get_all(db)
 
 
 @router.put("")
 def put_settings(payload: dict, db: Session = Depends(get_db)):
+    changed = 0
     for key, value in payload.items():
-        if key not in _PERSISTED:
-            continue
-        if key == "output_mode" and value not in ("folder", "cbz"):
-            continue
-        s = db.get(Setting, key)
-        if s is None:
-            db.add(Setting(key=key, value=str(value)))
-        else:
-            s.value = str(value)
-    db.commit()
-    return get_settings(db)
+        if set_setting(db, key, value):
+            changed += 1
+    if changed:
+        db.commit()
+    return get_all(db)

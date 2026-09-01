@@ -16,17 +16,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-COPY . .
-
-# Torch must be CPU-only first (PyPI's default pulls a ~2.5 GB CUDA build that
-# can't run here). Then install the package's ML extras — the already-present
-# CPU torch/torchvision satisfy the ml extras' `torch>=2.0` pins, so pip skips
-# re-downloading them.
+# ---- ML deps first (cached separately from the code COPY) -----------------
+# Torch must be CPU-only (PyPI's default pulls a ~2.5 GB CUDA build that can't
+# run here). Then the ML requirements, then simple-lama-inpainting with
+# --no-deps (its stale `pillow<10` + `numpy<2` pins conflict with manga-ocr).
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir "numpy<2.0" \
-    && pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir ".[ml]" \
+    && pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+COPY requirements-ml.txt .
+RUN pip install --no-cache-dir -r requirements-ml.txt \
     && pip install --no-cache-dir --no-deps simple-lama-inpainting
+
+# ---- code (this layer changes every deploy; the heavy deps above stay cached)
+COPY . .
+RUN pip install --no-cache-dir .
 
 # manga-ocr 0.1.16 predates transformers>=5.13, which misdetects its tokenizer
 # class for VisionEncoderDecoderModel and falls back to an incompatible

@@ -56,10 +56,15 @@ def render_translated_page(
     model: str,
     api_key: str,
     base_url: str = "https://openrouter.ai/api/v1",
+    dry_run: bool = False,
 ) -> tuple[Image.Image, list[TextBlock], float]:
     """Run the full pipeline on one page.
 
     Returns (result PIL image, blocks with translations, cost_usd).
+
+    `dry_run=True` runs detect + OCR but skips the LLM translation (no API call,
+    no cost) — the page is returned unchanged with blocks carrying empty
+    translations, so a dry-run job records what was *found* without spending.
     """
     image = Image.fromarray(load_image(image_path))
     image_np = np.asarray(image)
@@ -99,7 +104,12 @@ def render_translated_page(
     else:
         blocks = process_page(image_path)
 
-    blocks, cost = translate_page(blocks, model, api_key, base_url)
+    if dry_run:
+        cost = 0.0
+        for b in blocks:
+            b.translation = ""
+    else:
+        blocks, cost = translate_page(blocks, model, api_key, base_url)
 
     targets: list[tuple[TextBlock, tuple]] = []
     erase: list[tuple] = []

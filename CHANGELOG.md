@@ -2,6 +2,16 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.9.0] - 2026-09-01
+
+### Added
+- **Runtime settings** — model selection, API base URL, DeepSeek + OpenRouter API keys, dry-run, and output mode are now editable from the Settings tab and persisted in SQLite (previously model/keys were read-only env values). Changes take effect on the next job.
+- **Logs controls** — line-count selector, auto-refresh toggle, and a download link.
+- **Docker layer caching** — ML deps moved to a separate cached layer (`requirements-ml.txt`), so a `git pull` + rebuild is seconds rather than a full ~15 min re-download of torch/paddle.
+
+### Changed
+- `resolve_translation()` now reads the persisted settings store (model → base URL → matching API key) instead of config env directly.
+
 ## [0.8.0] - 2026-09-01
 
 ### Added

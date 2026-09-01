@@ -19,6 +19,7 @@ from app.db import SessionLocal
 from app.models import Job, Page, TextBlock
 from app.pipeline.render import render_translated_page
 from app.services.logging import get_logger
+from app.settings_store import get_setting
 
 log = get_logger("job_engine")
 
@@ -33,13 +34,22 @@ def _natural_key(name: str) -> list:
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
 
 
-def resolve_translation() -> tuple[str, str, str]:
-    """Return (model, base_url, api_key) for the pipeline."""
-    model = settings.deepseek_model
-    base_url = settings.deepseek_base_url
-    key = settings.deepseek_api_key or settings.openrouter_api_key
+def resolve_translation(db) -> tuple[str, str, str, bool]:
+    """Return (model, base_url, api_key, dry_run) from the persisted settings store.
+
+    The selected base URL picks the key: OpenRouter -> openrouter key, anything
+    else -> DeepSeek key. Falls back to the raw key file for local-dev when no
+    key is configured (Docker gets keys via env / the persisted settings).
+    """
+    model = get_setting(db, "model")
+    base_url = get_setting(db, "base_url")
+    dry_run = get_setting(db, "dry_run") == "true"
+    if "openrouter" in base_url.lower():
+        key = get_setting(db, "openrouter_api_key")
+    else:
+        key = get_setting(db, "deepseek_api_key")
     if not key:
-        # Local-dev fallback: read the raw key file directly (Docker gets keys via env).
+        # Local-dev fallback: read the raw key file directly.
         env = os.path.expanduser("~/.hermes/.env")
         if os.path.exists(env):
             for line in open(env):
@@ -47,7 +57,7 @@ def resolve_translation() -> tuple[str, str, str]:
                 if line.startswith("DEEPSEEK_API_KEY=") or line.startswith("OPENROUTER_API_KEY="):
                     key = line.split("=", 1)[1].strip().strip('"').strip("'")
                     break
-    return model, base_url, key
+    return model, base_url, key, dry_run
 
 
 def _job_dir(job_id: int) -> str:
@@ -102,16 +112,17 @@ def process_job(job_id: int) -> None:
         db.commit()
         log.info("job %s: processing %d pages (mode=%s)", job_id, job.pages_total, job.output_mode)
 
-        model, base_url, key = resolve_translation()
+        model, base_url, key, dry_run = resolve_translation(db)
         out_dir = _out_dir(job_id)
         os.makedirs(out_dir, exist_ok=True)
+        log.info("job %s: model=%s dry_run=%s", job_id, model, dry_run)
 
         pages = db.query(Page).filter(Page.job_id == job_id).order_by(Page.index).all()
         for p in pages:
             p.status = "running"
             db.commit()
             try:
-                img, blocks, cost = render_translated_page(p.original_path, model, key, base_url)
+                img, blocks, cost = render_translated_page(p.original_path, model, key, base_url, dry_run=dry_run)
                 out_path = os.path.join(out_dir, f"{p.index:04d}.png")
                 img.save(out_path)
                 p.output_path = out_path

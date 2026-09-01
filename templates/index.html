@@ -34,7 +34,7 @@
     <!-- Upload -->
     <section id="tab-upload" class="panel">
       <h2>Upload</h2>
-      <p class="muted">Single page, a batch of images, or a .cbz. Fully automatic — no review step.</p>
+      <p class="muted">Single page, a batch of images, or a .cbz. Fully automatic — no review step. Translation model is set under <b>Settings</b>.</p>
       <form id="upload-form">
         <label class="field">
           <span>Files</span>
@@ -45,7 +45,7 @@
           <input type="text" id="upload-name" placeholder="e.g. chapter-42">
         </label>
         <label class="field">
-          <span>Output mode</span>
+          <span>Output mode (this job)</span>
           <select id="upload-mode">
             <option value="folder" selected>Folder (leave pages as-is)</option>
             <option value="cbz">Re-assemble CBZ</option>
@@ -59,25 +59,62 @@
     <!-- Settings -->
     <section id="tab-settings" class="panel">
       <h2>Settings</h2>
-      <label class="field">
-        <span>Default output mode</span>
-        <select id="settings-mode">
-          <option value="folder">Folder (leave pages as-is)</option>
-          <option value="cbz">Re-assemble CBZ</option>
-        </select>
-      </label>
-      <div class="field read-only">
-        <span>Translation model</span>
-        <code id="settings-model"></code>
+      <div class="settings-form">
+        <label class="field">
+          <span>Translation model</span>
+          <select id="settings-model">
+            <option value="deepseek-v4-flash">DeepSeek V4 Flash (default)</option>
+            <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+            <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B (OpenRouter)</option>
+            <option value="__custom__">Custom…</option>
+          </select>
+          <input type="text" id="settings-model-custom" class="hidden" placeholder="custom model id (e.g. openai/gpt-4o-mini)">
+        </label>
+        <label class="field">
+          <span>API base URL</span>
+          <input type="text" id="settings-base-url" placeholder="https://api.deepseek.com/v1">
+        </label>
+        <label class="field">
+          <span>DeepSeek API key</span>
+          <input type="password" id="settings-deepseek-key" placeholder="sk-…" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>OpenRouter API key</span>
+          <input type="password" id="settings-openrouter-key" placeholder="sk-or-v1-…" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>Default output mode</span>
+          <select id="settings-mode">
+            <option value="folder">Folder (leave pages as-is)</option>
+            <option value="cbz">Re-assemble CBZ</option>
+          </select>
+        </label>
+        <label class="field checkbox">
+          <input type="checkbox" id="settings-dry-run">
+          <span>Dry run (detect + OCR only — no translation, no cost)</span>
+        </label>
+        <div class="toolbar">
+          <button id="settings-save" class="btn primary">Save settings</button>
+          <span id="settings-status" class="muted"></span>
+        </div>
       </div>
-      <div id="settings-status" class="muted"></div>
     </section>
 
     <!-- Logs -->
     <section id="tab-logs" class="panel">
       <div class="toolbar">
         <h2>Logs</h2>
+        <label>Lines
+          <select id="logs-lines">
+            <option>100</option>
+            <option selected>200</option>
+            <option>500</option>
+            <option>1000</option>
+          </select>
+        </label>
+        <label class="checkbox"><input type="checkbox" id="logs-auto" checked> auto-refresh</label>
         <button id="refresh-logs" class="btn">Refresh</button>
+        <a id="logs-download" class="btn" href="/api/logs?lines=100000" download="mangafill.log">Download</a>
       </div>
       <pre id="logs-view" class="logs"></pre>
     </section>

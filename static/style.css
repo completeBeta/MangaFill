@@ -59,14 +59,22 @@ h2 { margin-top: 0; font-size: 17px; }
 .btn.small { padding: 4px 10px; font-size: 13px; }
 
 /* Upload / settings */
-#upload-form, #tab-settings { display: flex; flex-direction: column; gap: 14px; max-width: 460px; }
+#upload-form, .settings-form { display: flex; flex-direction: column; gap: 14px; max-width: 460px; }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field span { color: var(--muted); font-size: 13px; }
-.field input[type=text], .field select, .field input[type=file] {
+.field input[type=text], .field input[type=password], .field select, .field input[type=file] {
   background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
   padding: 8px 10px; border-radius: 6px; font-size: 14px;
 }
 .field code { font-size: 13px; }
+.field.checkbox { flex-direction: row; align-items: center; gap: 8px; }
+.field.checkbox span { color: var(--text); font-size: 14px; }
+.hidden { display: none !important; }
+.toolbar label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.toolbar select, .toolbar input[type=checkbox] {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 6px; font-size: 13px;
+}
 
 /* Jobs list */
 .jobs-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
