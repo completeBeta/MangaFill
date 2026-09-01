@@ -2,6 +2,15 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.8.0] - 2026-09-01
+
+### Added
+- **Web UI** — FastAPI + SQLite + single background worker + Jinja2 dashboard: upload (page / batch / CBZ), live job progress, side-by-side viewer, output-mode setting (folder / cbz, leave-as-is default), browser download, logs.
+- **Docker build** now installs the ML extras (CPU-only torch/torchvision, transformers, manga-ocr, LaMa, onnxruntime) and patches manga-ocr for transformers>=5.13.
+
+### Fixed
+- **Degenerate detector box crash** — a zero-size / off-page `text_free` box cropped to an empty array and crashed manga-ocr's ViT (`shape '[1,3,224,224]' is invalid for input of size 0`); `ocr_crop` now clamps to image bounds and drops zero-area crops.
+
 ## [0.7.0] - 2026-08-31
 
 ### Added

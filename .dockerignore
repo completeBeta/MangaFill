@@ -13,3 +13,5 @@ fonts/*.otf
 tests
 *.db
 .pytest_cache
+output
+scripts
