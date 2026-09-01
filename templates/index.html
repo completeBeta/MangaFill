@@ -11,9 +11,95 @@
     <h1>Manga Fill</h1>
     <span class="version">v{{ version }}</span>
   </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="jobs">Jobs</button>
+    <button class="tab" data-tab="upload">Upload</button>
+    <button class="tab" data-tab="settings">Settings</button>
+    <button class="tab" data-tab="logs">Logs</button>
+  </nav>
+
   <main>
-    <p>Translate raw Japanese manga → English. Pipeline: detect → OCR → translate → inpaint → typeset.</p>
-    <p class="muted">Scaffold — upload / jobs / viewer arrive in later milestones.</p>
+    <!-- Jobs -->
+    <section id="tab-jobs" class="panel active">
+      <div class="toolbar">
+        <h2>Jobs</h2>
+        <button id="refresh-jobs" class="btn">Refresh</button>
+      </div>
+      <div id="jobs-list" class="jobs-list">
+        <p class="muted">No jobs yet — upload some pages.</p>
+      </div>
+    </section>
+
+    <!-- Upload -->
+    <section id="tab-upload" class="panel">
+      <h2>Upload</h2>
+      <p class="muted">Single page, a batch of images, or a .cbz. Fully automatic — no review step.</p>
+      <form id="upload-form">
+        <label class="field">
+          <span>Files</span>
+          <input type="file" id="upload-files" accept=".jpg,.jpeg,.png,.webp,.cbz" multiple required>
+        </label>
+        <label class="field">
+          <span>Name (optional)</span>
+          <input type="text" id="upload-name" placeholder="e.g. chapter-42">
+        </label>
+        <label class="field">
+          <span>Output mode</span>
+          <select id="upload-mode">
+            <option value="folder" selected>Folder (leave pages as-is)</option>
+            <option value="cbz">Re-assemble CBZ</option>
+          </select>
+        </label>
+        <button type="submit" class="btn primary">Start translation</button>
+      </form>
+      <div id="upload-status" class="muted"></div>
+    </section>
+
+    <!-- Settings -->
+    <section id="tab-settings" class="panel">
+      <h2>Settings</h2>
+      <label class="field">
+        <span>Default output mode</span>
+        <select id="settings-mode">
+          <option value="folder">Folder (leave pages as-is)</option>
+          <option value="cbz">Re-assemble CBZ</option>
+        </select>
+      </label>
+      <div class="field read-only">
+        <span>Translation model</span>
+        <code id="settings-model"></code>
+      </div>
+      <div id="settings-status" class="muted"></div>
+    </section>
+
+    <!-- Logs -->
+    <section id="tab-logs" class="panel">
+      <div class="toolbar">
+        <h2>Logs</h2>
+        <button id="refresh-logs" class="btn">Refresh</button>
+      </div>
+      <pre id="logs-view" class="logs"></pre>
+    </section>
   </main>
+
+  <!-- Side-by-side viewer -->
+  <div id="viewer" class="viewer hidden">
+    <div class="viewer-bar">
+      <span id="viewer-title"></span>
+      <div class="viewer-nav">
+        <button id="viewer-prev">◀ Prev</button>
+        <span id="viewer-pos"></span>
+        <button id="viewer-next">Next ▶</button>
+      </div>
+      <button id="viewer-close">✕</button>
+    </div>
+    <div class="viewer-panes">
+      <figure><figcaption>Original</figcaption><img id="viewer-orig" alt="original"></figure>
+      <figure><figcaption>Translated</figcaption><img id="viewer-trans" alt="translated"></figure>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
 </body>
 </html>
