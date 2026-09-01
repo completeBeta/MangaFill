@@ -42,6 +42,8 @@ def init_db() -> None:
         cols = [r[1] for r in conn.exec_driver_sql("PRAGMA table_info(jobs)")]
         if "model_id" not in cols:
             conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN model_id INTEGER")
+        if "source_format" not in cols:
+            conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN source_format VARCHAR DEFAULT 'folder'")
 
         mcols = [r[1] for r in conn.exec_driver_sql("PRAGMA table_info(models)")]
         for col, ddl in [

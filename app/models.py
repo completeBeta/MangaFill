@@ -19,7 +19,8 @@ class Job(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     source: Mapped[str] = mapped_column(String, default="upload")
     name: Mapped[str] = mapped_column(String, default="")
-    output_mode: Mapped[str] = mapped_column(String, default="folder")  # folder | cbz
+    output_mode: Mapped[str] = mapped_column(String, default="folder")  # folder | cbz | mirror
+    source_format: Mapped[str] = mapped_column(String, default="folder")  # input: folder | cbz | zip
     model_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # -> models.id (soft ref)
     status: Mapped[str] = mapped_column(String, default="queued")  # queued|running|done|partial|failed|cancelled
     pages_total: Mapped[int] = mapped_column(Integer, default=0)

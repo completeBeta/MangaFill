@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     output_dir: str = "/data/output"
 
     # Output
-    output_mode: str = "folder"   # folder | cbz  (leave-as-is default)
+    output_mode: str = "folder"   # folder | cbz | mirror
 
 
 settings = Settings()

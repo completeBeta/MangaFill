@@ -8,9 +8,9 @@ persistence, and output-mode assembly.
 """
 from __future__ import annotations
 
-import io
 import os
 import re
+import shutil
 import zipfile
 from datetime import datetime, timezone
 
@@ -25,6 +25,7 @@ from app.settings_store import default_model, get_model, get_setting
 log = get_logger("job_engine")
 
 _IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+_CHUNK = 1024 * 1024  # 1 MB streaming chunks — never read a whole upload into RAM
 
 
 def _now() -> str:
@@ -72,32 +73,55 @@ def _out_dir(job_id: int) -> str:
     return os.path.join(_job_dir(job_id), "output")
 
 
-def ingest_upload(job_id: int, files: list) -> list[str]:
-    """Save uploaded files (images and/or a .cbz) to the job's original dir, in
-    natural reading order. Returns the sorted list of saved page paths."""
+def _stream_to(path: str, src) -> None:
+    """Copy an open file-like `src` to `path` in 1 MB chunks.
+
+    Never calls `src.read()` without a size — reading a whole upload into RAM is
+    what OOM-killed Subber on this swap-less VM. Chunked streaming keeps peak
+    memory at ~1 MB regardless of upload size.
+    """
+    with open(path, "wb") as out:
+        while True:
+            chunk = src.read(_CHUNK)
+            if not chunk:
+                break
+            out.write(chunk)
+
+
+def ingest_upload(job_id: int, files: list) -> tuple[list[str], str]:
+    """Save uploaded files (images and/or a .cbz/.zip) to the job's original dir,
+    in natural reading order. Returns (page_paths, source_format).
+
+    Archives are staged to disk and expanded member-by-member via streaming — the
+    whole archive is never held in RAM.
+    """
     orig = _orig_dir(job_id)
     os.makedirs(orig, exist_ok=True)
     paths: list[str] = []
+    source_format = "folder"
 
     for f in files:
         name = f.filename or "page"
         low = name.lower()
-        if low.endswith(".cbz"):
-            zf = zipfile.ZipFile(io.BytesIO(f.file.read()))
-            for member in sorted(zf.namelist(), key=_natural_key):
-                if member.lower().endswith(_IMG_EXTS):
-                    out = os.path.join(orig, os.path.basename(member))
-                    with open(out, "wb") as o:
-                        o.write(zf.read(member))
-                    paths.append(out)
+        if low.endswith(".cbz") or low.endswith(".zip"):
+            source_format = "cbz" if low.endswith(".cbz") else "zip"
+            archive_path = os.path.join(orig, os.path.basename(name))
+            _stream_to(archive_path, f.file)
+            with zipfile.ZipFile(archive_path) as zf:
+                for member in sorted(zf.namelist(), key=_natural_key):
+                    if member.lower().endswith(_IMG_EXTS):
+                        out = os.path.join(orig, os.path.basename(member))
+                        with zf.open(member) as src, open(out, "wb") as dst:
+                            shutil.copyfileobj(src, dst, _CHUNK)
+                        paths.append(out)
+            os.remove(archive_path)  # expanded — drop the staging copy
         elif low.endswith(_IMG_EXTS):
             out = os.path.join(orig, name)
-            with open(out, "wb") as o:
-                o.write(f.file.read())
+            _stream_to(out, f.file)
             paths.append(out)
 
     paths.sort(key=lambda p: _natural_key(os.path.basename(p)))
-    return paths
+    return paths, source_format
 
 
 def process_job(job_id: int) -> None:
@@ -163,8 +187,8 @@ def process_job(job_id: int) -> None:
         total = job.pages_total
         job.status = "done" if done == total else ("partial" if done > 0 else "failed")
         job.finished_at = _now()
-        if job.output_mode == "cbz" and done > 0:
-            job.error = assemble_cbz(job_id) or None
+        if done > 0:
+            job.error = _assemble(job_id, job.output_mode, job.source_format) or None
         job.updated_at = _now()
         db.commit()
         log.info("job %s finished: status=%s (%d/%d pages)", job_id, job.status, done, total)
@@ -183,8 +207,22 @@ def process_job(job_id: int) -> None:
         db.close()
 
 
-def assemble_cbz(job_id: int) -> str | None:
-    """Zip the job's output pages into <name>.cbz. Returns an error string or None."""
+def _assemble(job_id: int, output_mode: str, source_format: str) -> str | None:
+    """Assemble the output per the chosen mode. Returns an error string or None.
+
+    - "cbz"    → always a .cbz
+    - "mirror" → match the input format (.cbz → .cbz, .zip → .zip, folder → none)
+    - "folder" → leave as-is (no assembly)
+    """
+    if output_mode == "cbz":
+        return assemble_archive(job_id, "cbz")
+    if output_mode == "mirror" and source_format in ("cbz", "zip"):
+        return assemble_archive(job_id, source_format)
+    return None
+
+
+def assemble_archive(job_id: int, ext: str) -> str | None:
+    """Zip the job's output pages into translated.<ext>. Returns an error or None."""
     out_dir = _out_dir(job_id)
     pages = sorted(
         [f for f in os.listdir(out_dir) if f.lower().endswith(_IMG_EXTS)],
@@ -192,8 +230,8 @@ def assemble_cbz(job_id: int) -> str | None:
     )
     if not pages:
         return "no output pages to assemble"
-    cbz_path = os.path.join(_job_dir(job_id), "translated.cbz")
-    with zipfile.ZipFile(cbz_path, "w", zipfile.ZIP_STORED) as zf:
+    arc_path = os.path.join(_job_dir(job_id), f"translated.{ext}")
+    with zipfile.ZipFile(arc_path, "w", zipfile.ZIP_STORED) as zf:
         for name in pages:
             zf.write(os.path.join(out_dir, name), arcname=name)
     return None

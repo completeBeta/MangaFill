@@ -2,6 +2,15 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.12.0] - 2026-09-01
+
+### Added
+- **Mirror input format output mode** — third output option that re-assembles output in the same container as the input: CBZ → CBZ, ZIP → ZIP, folder → folder. `.zip` uploads are now accepted (handled identically to `.cbz`).
+
+### Fixed
+- **Streaming upload ingest (OOM)** — `ingest_upload` no longer reads whole files into RAM (`f.file.read()` / `io.BytesIO(...)`). Uploads and CBZ/ZIP archives are staged to disk and expanded in 1 MB chunks, so a large archive can't OOM-kill the container on the swap-less VM — the same class of bug that crashed Subber.
+- **`set_setting` idempotency** — a second set of the same key in one session now updates instead of raising a duplicate-key IntegrityError.
+
 ## [0.11.0] - 2026-09-01
 
 ### Added

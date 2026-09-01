@@ -48,18 +48,19 @@ def create_job(
     model_id: int | None = Form(None),
     db: Session = Depends(get_db),
 ):
-    if output_mode not in ("folder", "cbz"):
+    if output_mode not in ("folder", "cbz", "mirror"):
         output_mode = "folder"
     job = Job(source="upload", name=name, output_mode=output_mode, model_id=model_id)
     db.add(job)
     db.commit()
     db.refresh(job)
 
-    paths = ingest_upload(job.id, files)
+    paths, source_format = ingest_upload(job.id, files)
     if not paths:
         db.delete(job)
         db.commit()
         raise HTTPException(400, "no image pages found in upload")
+    job.source_format = source_format
     for i, p in enumerate(paths):
         db.add(Page(job_id=job.id, index=i, original_path=p))
     job.name = job.name or os.path.splitext(os.path.basename(paths[0]))[0]
@@ -97,10 +98,11 @@ def download(job_id: int, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
-    # Prefer an assembled CBZ; otherwise zip the output folder on the fly.
-    cbz = os.path.join(_job_dir(job_id), "translated.cbz")
-    if os.path.exists(cbz):
-        return FileResponse(cbz, filename=f"{job.name}.cbz")
+    # Prefer an assembled CBZ, then an assembled ZIP, else zip the folder on the fly.
+    for ext in ("cbz", "zip"):
+        arc = os.path.join(_job_dir(job_id), f"translated.{ext}")
+        if os.path.exists(arc):
+            return FileResponse(arc, filename=f"{job.name}.{ext}")
     out_dir = _out_dir(job_id)
     pages = sorted(
         [f for f in os.listdir(out_dir) if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))],

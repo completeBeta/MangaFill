@@ -16,7 +16,7 @@ from app.config import settings as cfg
 from app.models import Model, Setting
 
 SETTINGS: dict[str, tuple[str, tuple | None]] = {
-    "output_mode": ("folder", ("folder", "cbz")),
+    "output_mode": ("folder", ("folder", "cbz", "mirror")),
     "dry_run": ("true", ("true", "false")),
 }
 
@@ -38,6 +38,7 @@ def set_setting(db, key: str, value) -> bool:
     allowed = SETTINGS[key][1]
     if allowed is not None and value not in allowed:
         return False
+    db.flush()  # surface pending rows so a 2nd set in the same session updates, not duplicate-inserts
     s = db.get(Setting, key)
     if s is None:
         db.add(Setting(key=key, value=str(value)))
