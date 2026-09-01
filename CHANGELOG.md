@@ -2,6 +2,15 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.10.0] - 2026-09-01
+
+### Added
+- **Model list (model-agnostic)** — translation models are a user-managed list (add/remove from Settings with +/−), each just an OpenAI-compatible `{name, base_url, api_key}`. Pick a model per job at upload; the worker resolves it against the list.
+
+### Changed
+- **Removed DeepSeek/OpenRouter-specific config** — no per-provider API-key fields or hardcoded model presets; everything is a generic OpenAI-compatible endpoint. Env config now seeds a single default model (`default_model` / `default_base_url` / `default_api_key`).
+- **Fixed tab isolation** — the Settings/Logs panels no longer render on every page (dropped the `#tab-settings { display:flex }` override), and static assets get a `?v=` cache-buster so browsers don't serve stale CSS/JS.
+
 ## [0.9.0] - 2026-09-01
 
 ### Added

@@ -20,6 +20,7 @@ def _job_dict(job: Job, with_pages: bool = False) -> dict:
         "id": job.id,
         "name": job.name,
         "output_mode": job.output_mode,
+        "model_id": job.model_id,
         "status": job.status,
         "pages_total": job.pages_total,
         "pages_done": job.pages_done,
@@ -44,11 +45,12 @@ def create_job(
     files: list[UploadFile] = File(...),
     name: str = Form(""),
     output_mode: str = Form("folder"),
+    model_id: int | None = Form(None),
     db: Session = Depends(get_db),
 ):
     if output_mode not in ("folder", "cbz"):
         output_mode = "folder"
-    job = Job(source="upload", name=name, output_mode=output_mode)
+    job = Job(source="upload", name=name, output_mode=output_mode, model_id=model_id)
     db.add(job)
     db.commit()
     db.refresh(job)

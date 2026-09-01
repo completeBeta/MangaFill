@@ -1,4 +1,4 @@
-"""ORM models — mirror the plan's data model (§8): jobs, pages, text_blocks, settings."""
+"""ORM models — jobs, pages, text_blocks, settings, and the user-managed model list."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -20,6 +20,7 @@ class Job(Base):
     source: Mapped[str] = mapped_column(String, default="upload")
     name: Mapped[str] = mapped_column(String, default="")
     output_mode: Mapped[str] = mapped_column(String, default="folder")  # folder | cbz
+    model_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # -> models.id (soft ref)
     status: Mapped[str] = mapped_column(String, default="queued")  # queued|running|done|partial|failed|cancelled
     pages_total: Mapped[int] = mapped_column(Integer, default=0)
     pages_done: Mapped[int] = mapped_column(Integer, default=0)
@@ -75,3 +76,15 @@ class Setting(Base):
     key: Mapped[str] = mapped_column(String, primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[str] = mapped_column(String, default=_now)
+
+
+class Model(Base):
+    """A translation model — any OpenAI-compatible endpoint (name + base_url + api_key)."""
+
+    __tablename__ = "models"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, default="")
+    base_url: Mapped[str] = mapped_column(String, default="")
+    api_key: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[str] = mapped_column(String, default=_now)

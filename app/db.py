@@ -37,3 +37,8 @@ def init_db() -> None:
     from app import models  # noqa: F401  (register tables)
 
     Base.metadata.create_all(engine)
+    # Lightweight, idempotent migrations (SQLite has no ALTER via create_all).
+    with engine.begin() as conn:
+        cols = [r[1] for r in conn.exec_driver_sql("PRAGMA table_info(jobs)")]
+        if "model_id" not in cols:
+            conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN model_id INTEGER")

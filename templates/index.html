@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Manga Fill</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ version }}">
 </head>
 <body>
   <header>
@@ -34,7 +34,7 @@
     <!-- Upload -->
     <section id="tab-upload" class="panel">
       <h2>Upload</h2>
-      <p class="muted">Single page, a batch of images, or a .cbz. Fully automatic — no review step. Translation model is set under <b>Settings</b>.</p>
+      <p class="muted">Single page, a batch of images, or a .cbz. Fully automatic — no review step.</p>
       <form id="upload-form">
         <label class="field">
           <span>Files</span>
@@ -45,7 +45,11 @@
           <input type="text" id="upload-name" placeholder="e.g. chapter-42">
         </label>
         <label class="field">
-          <span>Output mode (this job)</span>
+          <span>Model</span>
+          <select id="upload-model"></select>
+        </label>
+        <label class="field">
+          <span>Output mode</span>
           <select id="upload-mode">
             <option value="folder" selected>Folder (leave pages as-is)</option>
             <option value="cbz">Re-assemble CBZ</option>
@@ -60,42 +64,40 @@
     <section id="tab-settings" class="panel">
       <h2>Settings</h2>
       <div class="settings-form">
-        <label class="field">
-          <span>Translation model</span>
-          <select id="settings-model">
-            <option value="deepseek-v4-flash">DeepSeek V4 Flash (default)</option>
-            <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
-            <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B (OpenRouter)</option>
-            <option value="__custom__">Custom…</option>
-          </select>
-          <input type="text" id="settings-model-custom" class="hidden" placeholder="custom model id (e.g. openai/gpt-4o-mini)">
-        </label>
-        <label class="field">
-          <span>API base URL</span>
-          <input type="text" id="settings-base-url" placeholder="https://api.deepseek.com/v1">
-        </label>
-        <label class="field">
-          <span>DeepSeek API key</span>
-          <input type="password" id="settings-deepseek-key" placeholder="sk-…" autocomplete="off">
-        </label>
-        <label class="field">
-          <span>OpenRouter API key</span>
-          <input type="password" id="settings-openrouter-key" placeholder="sk-or-v1-…" autocomplete="off">
-        </label>
-        <label class="field">
-          <span>Default output mode</span>
-          <select id="settings-mode">
-            <option value="folder">Folder (leave pages as-is)</option>
-            <option value="cbz">Re-assemble CBZ</option>
-          </select>
-        </label>
-        <label class="field checkbox">
-          <input type="checkbox" id="settings-dry-run">
-          <span>Dry run (detect + OCR only — no translation, no cost)</span>
-        </label>
-        <div class="toolbar">
-          <button id="settings-save" class="btn primary">Save settings</button>
-          <span id="settings-status" class="muted"></span>
+        <div class="settings-section">
+          <div class="toolbar">
+            <h3>Models</h3>
+            <button id="model-add" class="btn small">+ Add model</button>
+          </div>
+          <div id="models-list" class="models-list"></div>
+          <div id="model-editor" class="model-editor hidden">
+            <input type="text" id="model-name" placeholder="Model id (e.g. gpt-4o-mini)">
+            <input type="text" id="model-base" placeholder="API base URL (e.g. https://api.openai.com/v1)">
+            <input type="password" id="model-key" placeholder="API key" autocomplete="off">
+            <div class="toolbar">
+              <button id="model-save" class="btn primary">Save model</button>
+              <button id="model-cancel" class="btn">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>General</h3>
+          <label class="field">
+            <span>Default output mode</span>
+            <select id="settings-mode">
+              <option value="folder">Folder (leave pages as-is)</option>
+              <option value="cbz">Re-assemble CBZ</option>
+            </select>
+          </label>
+          <label class="field checkbox">
+            <input type="checkbox" id="settings-dry-run">
+            <span>Dry run (detect + OCR only — no translation, no cost)</span>
+          </label>
+          <div class="toolbar">
+            <button id="settings-save" class="btn primary">Save settings</button>
+            <span id="settings-status" class="muted"></span>
+          </div>
         </div>
       </div>
     </section>
@@ -137,6 +139,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v={{ version }}"></script>
 </body>
 </html>

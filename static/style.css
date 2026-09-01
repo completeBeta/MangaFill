@@ -76,6 +76,22 @@ h2 { margin-top: 0; font-size: 17px; }
   border-radius: 6px; padding: 4px 6px; font-size: 13px;
 }
 
+/* Settings sections + model list */
+.settings-section { border: 1px solid var(--border); border-radius: 8px; padding: 14px; background: var(--panel); }
+.settings-section h3 { margin: 0 0 10px; font-size: 15px; }
+.models-list { display: flex; flex-direction: column; gap: 8px; }
+.model-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
+.model-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.model-name { font-weight: 600; }
+.model-base { font-size: 12px; word-break: break-all; }
+.model-editor { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding: 10px; border: 1px dashed var(--border); border-radius: 6px; }
+.model-editor input { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); padding: 8px 10px; border-radius: 6px; font-size: 14px; }
+.ok { color: var(--ok); }
+.warn { color: var(--warn); }
+.btn.danger { border-color: var(--err); color: var(--err); }
+.btn.danger:hover { background: var(--err); color: #fff; }
+.badge.muted { color: var(--muted); }
+
 /* Jobs list */
 .jobs-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
 .job {

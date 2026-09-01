@@ -22,12 +22,86 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
   if (name === "logs") loadLogs();
-  if (name === "settings") loadSettings();
+  if (name === "settings") loadModels();
 }
 
 // ---------- tabs ----------
 document.querySelectorAll(".tab").forEach((btn) => {
   btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+});
+
+// ---------- models (shared state) ----------
+let modelMap = {};   // id -> {name, base_url, api_key}
+
+async function loadModels() {
+  const models = await api("/api/models");
+  modelMap = {};
+  models.forEach((m) => (modelMap[m.id] = m));
+  renderModels(models);
+  renderModelSelect(models);
+}
+
+function renderModels(models) {
+  const el = $("#models-list");
+  if (!models.length) {
+    el.innerHTML = '<p class="muted">No models yet — add one to start translating.</p>';
+    return;
+  }
+  el.innerHTML = models.map((m) => `
+    <div class="model-row">
+      <div class="model-info">
+        <span class="model-name">${esc(m.name)}</span>
+        <span class="muted model-base">${esc(m.base_url)}</span>
+        <span class="${m.api_key ? "ok" : "warn"}">${m.api_key ? "key set" : "no key"}</span>
+      </div>
+      <button class="btn small danger model-remove" onclick="removeModel(${m.id})" title="Remove model">−</button>
+    </div>
+  `).join("");
+}
+
+function renderModelSelect(models) {
+  const sel = $("#upload-model");
+  const prev = sel.value;
+  sel.innerHTML = models.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("");
+  if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  else if (models.length) sel.value = String(models[0].id);
+  if (!models.length) sel.innerHTML = '<option value="">(no models — add one in Settings)</option>';
+}
+
+async function removeModel(id) {
+  const m = modelMap[id];
+  if (!confirm(`Remove model "${m ? m.name : id}"?`)) return;
+  await fetch("/api/models/" + id, { method: "DELETE" });
+  loadModels();
+}
+
+$("#model-add").addEventListener("click", () => {
+  $("#model-name").value = "";
+  $("#model-base").value = "";
+  $("#model-key").value = "";
+  $("#model-editor").classList.remove("hidden");
+  $("#model-name").focus();
+});
+$("#model-cancel").addEventListener("click", () => $("#model-editor").classList.add("hidden"));
+$("#model-save").addEventListener("click", async () => {
+  const name = $("#model-name").value.trim();
+  const base_url = $("#model-base").value.trim();
+  const api_key = $("#model-key").value.trim();
+  if (!name || !base_url) {
+    alert("Model id and API base URL are required.");
+    return;
+  }
+  try {
+    await api("/api/models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, base_url, api_key }),
+    });
+    $("#model-editor").classList.add("hidden");
+    loadModels();
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
 });
 
 // ---------- jobs ----------
@@ -42,11 +116,13 @@ function renderJobs(jobs) {
   el.innerHTML = jobs.map((j) => {
     const pct = j.pages_total ? Math.round((100 * j.pages_done) / j.pages_total) : 0;
     const viewable = j.status === "done" || j.status === "partial";
+    const modelName = modelMap[j.model_id] ? modelMap[j.model_id].name : "default";
     return `
       <div class="job ${j.error ? "error-box" : ""}">
         <div class="job-head">
           <span class="job-name">${esc(j.name)}</span>
           <span class="badge ${BADGE[j.status] || "queued"}">${esc(j.status)}</span>
+          <span class="badge muted">${esc(modelName)}</span>
           <span class="muted" style="margin-left:auto">#${j.id}</span>
         </div>
         <div class="progress"><span style="width:${pct}%"></span></div>
@@ -86,6 +162,8 @@ $("#upload-form").addEventListener("submit", async (e) => {
   for (const f of files) fd.append("files", f);
   fd.append("name", $("#upload-name").value);
   fd.append("output_mode", $("#upload-mode").value);
+  const modelId = $("#upload-model").value;
+  if (modelId) fd.append("model_id", modelId);
   const status = $("#upload-status");
   status.textContent = "Uploading\u2026";
   try {
@@ -100,50 +178,14 @@ $("#upload-form").addEventListener("submit", async (e) => {
 });
 
 // ---------- settings ----------
-const MODEL_BASE = {
-  "deepseek-v4-flash": "https://api.deepseek.com/v1",
-  "deepseek-v4-pro": "https://api.deepseek.com/v1",
-  "meta-llama/llama-3.1-8b-instruct": "https://openrouter.ai/api/v1",
-};
-
 async function loadSettings() {
   const s = await api("/api/settings");
-  if (s.model in MODEL_BASE) {
-    $("#settings-model").value = s.model;
-    $("#settings-model-custom").classList.add("hidden");
-  } else {
-    $("#settings-model").value = "__custom__";
-    $("#settings-model-custom").value = s.model || "";
-    $("#settings-model-custom").classList.remove("hidden");
-  }
-  $("#settings-base-url").value = s.base_url;
-  $("#settings-deepseek-key").value = s.deepseek_api_key;
-  $("#settings-openrouter-key").value = s.openrouter_api_key;
   $("#settings-mode").value = s.output_mode;
   $("#settings-dry-run").checked = s.dry_run === "true";
-  // keep the upload page's per-job default in sync
-  $("#upload-mode").value = s.output_mode;
 }
 
-$("#settings-model").addEventListener("change", () => {
-  const v = $("#settings-model").value;
-  if (v === "__custom__") {
-    $("#settings-model-custom").classList.remove("hidden");
-    $("#settings-model-custom").focus();
-  } else {
-    $("#settings-model-custom").classList.add("hidden");
-    if (MODEL_BASE[v]) $("#settings-base-url").value = MODEL_BASE[v];
-  }
-});
-
 $("#settings-save").addEventListener("click", async () => {
-  let model = $("#settings-model").value;
-  if (model === "__custom__") model = $("#settings-model-custom").value.trim();
   const payload = {
-    model,
-    base_url: $("#settings-base-url").value.trim(),
-    deepseek_api_key: $("#settings-deepseek-key").value.trim(),
-    openrouter_api_key: $("#settings-openrouter-key").value.trim(),
     output_mode: $("#settings-mode").value,
     dry_run: $("#settings-dry-run").checked ? "true" : "false",
   };
@@ -156,7 +198,6 @@ $("#settings-save").addEventListener("click", async () => {
       body: JSON.stringify(payload),
     });
     status.textContent = "Saved.";
-    $("#upload-mode").value = $("#settings-mode").value;
     setTimeout(() => (status.textContent = ""), 2000);
   } catch (err) {
     status.textContent = "Error: " + err.message;
@@ -209,4 +250,5 @@ document.addEventListener("keydown", (e) => {
 // ---------- boot ----------
 loadJobs();
 loadSettings();
+loadModels();
 setInterval(loadJobs, 2500);

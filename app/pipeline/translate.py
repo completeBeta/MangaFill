@@ -55,11 +55,10 @@ def translate_lines(
         "max_tokens": 4000,
         "temperature": 0.2,
     }
-    # DeepSeek v4 models reason by default, but translation needs none of it:
-    # the chain-of-thought burns the max_tokens budget and returns EMPTY content
-    # on larger batches (finish_reason=length, reasoning_tokens=max_tokens).
-    # Disable reasoning explicitly.
-    if model.lower().startswith("deepseek"):
+    # DeepSeek v4 models reason by default, burning the max_tokens budget and
+    # returning empty content on larger batches. Disable reasoning when the
+    # endpoint is DeepSeek (harmless no-op on other OpenAI-compatible providers).
+    if "deepseek" in base_url.lower():
         payload["thinking"] = {"type": "disabled"}
 
     resp = httpx.post(

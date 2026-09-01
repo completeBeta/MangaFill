@@ -1,8 +1,4 @@
-"""Settings endpoints — read/write the persisted runtime settings.
-
-Model / base URL / API keys / dry-run / output mode are editable here; the
-worker reads the same store, so changes take effect on the next job.
-"""
+"""Settings endpoints — output mode + dry-run (model config lives under /api/models)."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends

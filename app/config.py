@@ -1,8 +1,8 @@
 """Configuration — env + defaults (pydantic-settings).
 
-Secrets come from `.env` (never committed). The full YAML schema is documented in
-`config.example.yaml`; YAML loading is wired in a later milestone once runtime
-settings (output mode, dry-run, model) are exposed via the web UI.
+Secrets come from `.env` (never committed). The model list is user-managed in
+the web UI (SQLite `models` table); the env vars below only seed ONE default
+model on first boot — any OpenAI-compatible endpoint works.
 """
 from __future__ import annotations
 
@@ -25,15 +25,11 @@ class Settings(BaseSettings):
     target_lang: str = "en"
     device: str = "cpu"
 
-    # Translation (cloud-only, no local GPU). DeepSeek v4-flash is primary
-    # (switched 2026-08-31 — fixes dialogue errors, cheaper); OpenRouter is the
-    # fallback. DeepSeek v4 models reason by default — translate.py disables it.
-    deepseek_api_key: str = ""
-    deepseek_model: str = "deepseek-v4-flash"
-    deepseek_base_url: str = "https://api.deepseek.com/v1"
-    openrouter_api_key: str = ""
-    openrouter_model: str = "meta-llama/llama-3.1-8b-instruct"
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # Default translation model (seeded on first boot; add/remove more from the
+    # web UI Settings tab). Model-agnostic — any OpenAI-compatible endpoint.
+    default_model: str = "deepseek-v4-flash"
+    default_base_url: str = "https://api.deepseek.com/v1"
+    default_api_key: str = ""
 
     # Storage
     state_db: str = "/data/mangafill.db"
