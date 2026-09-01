@@ -2,6 +2,18 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.11.0] - 2026-09-01
+
+### Added
+- **LLM pricing (peak/off-peak)** — each model now stores peak input/output rates ($/1M tokens) plus an optional off-peak rate + UTC window. The worker reads `usage.prompt_tokens` / `usage.completion_tokens` from the API response and prices each page against the model's rates (peak vs off-peak by current UTC time). Jobs now track `tokens_used` and a real `cost_usd` instead of the always-$0 placeholder.
+- **Editable models in Settings** — each model row has a ▾ toggle that expands an inline editor (name, base URL, API key, pricing) with a Save button, plus the existing − remove. The + Add model form now includes the pricing fields.
+
+### Changed
+- **Tab state persists across refresh** — the active tab is stored in localStorage and restored on reload (previously a refresh always jumped back to Jobs).
+
+### Fixed
+- Model `api_key` no longer hardcoded as the seed default's only field — pricing fields are part of the model dict/CRUD.
+
 ## [0.10.0] - 2026-09-01
 
 ### Added

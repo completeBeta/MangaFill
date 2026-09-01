@@ -87,4 +87,12 @@ class Model(Base):
     name: Mapped[str] = mapped_column(String, default="")
     base_url: Mapped[str] = mapped_column(String, default="")
     api_key: Mapped[str] = mapped_column(String, default="")
+    # Pricing ($/1M tokens). Peak rates drive the cost display; off-peak rate +
+    # window are optional (blank = no off-peak discount).
+    price_in: Mapped[float] = mapped_column(Float, default=0.0)
+    price_out: Mapped[float] = mapped_column(Float, default=0.0)
+    offpeak_in: Mapped[float | None] = mapped_column(Float, nullable=True)
+    offpeak_out: Mapped[float | None] = mapped_column(Float, nullable=True)
+    offpeak_start: Mapped[str | None] = mapped_column(String, nullable=True)  # "HH:MM" UTC
+    offpeak_end: Mapped[str | None] = mapped_column(String, nullable=True)    # "HH:MM" UTC
     created_at: Mapped[str] = mapped_column(String, default=_now)

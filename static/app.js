@@ -1,6 +1,7 @@
 // Manga Fill dashboard — vanilla JS against the JSON API.
 
 const $ = (s) => document.querySelector(s);
+const TAB_KEY = "mangafill.tab";
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => (
@@ -18,11 +19,16 @@ async function api(path, opts = {}) {
   return r.json();
 }
 
-function switchTab(name) {
+function setActiveTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
+  try { localStorage.setItem(TAB_KEY, name); } catch {}
+}
+
+function switchTab(name) {
+  setActiveTab(name);
   if (name === "logs") loadLogs();
-  if (name === "settings") loadModels();
+  if (name === "settings") { loadSettings(); loadModels(); }
 }
 
 // ---------- tabs ----------
@@ -31,7 +37,7 @@ document.querySelectorAll(".tab").forEach((btn) => {
 });
 
 // ---------- models (shared state) ----------
-let modelMap = {};   // id -> {name, base_url, api_key}
+let modelMap = {};   // id -> full model dict
 
 async function loadModels() {
   const models = await api("/api/models");
@@ -41,6 +47,50 @@ async function loadModels() {
   renderModelSelect(models);
 }
 
+function modelFields(prefix, m) {
+  const v = (x) => esc(x == null ? "" : x);
+  return `
+    <label class="field"><span>Model id</span>
+      <input type="text" id="${prefix}-name" placeholder="e.g. gpt-4o-mini" value="${v(m.name)}"></label>
+    <label class="field"><span>API base URL</span>
+      <input type="text" id="${prefix}-base" placeholder="https://api.openai.com/v1" value="${v(m.base_url)}"></label>
+    <label class="field"><span>API key</span>
+      <input type="password" id="${prefix}-key" placeholder="sk-…" autocomplete="off" value="${v(m.api_key)}"></label>
+    <div class="pricing">
+      <div class="pricing-title">Pricing — $/1M tokens (peak = standard rate; off-peak optional)</div>
+      <div class="pricing-grid">
+        <label class="field"><span>Input (peak)</span>
+          <input type="number" step="any" min="0" id="${prefix}-price-in" value="${v(m.price_in ?? 0)}"></label>
+        <label class="field"><span>Output (peak)</span>
+          <input type="number" step="any" min="0" id="${prefix}-price-out" value="${v(m.price_out ?? 0)}"></label>
+        <label class="field"><span>Input (off-peak)</span>
+          <input type="number" step="any" min="0" id="${prefix}-offpeak-in" value="${v(m.offpeak_in)}"></label>
+        <label class="field"><span>Output (off-peak)</span>
+          <input type="number" step="any" min="0" id="${prefix}-offpeak-out" value="${v(m.offpeak_out)}"></label>
+        <label class="field"><span>Off-peak start (UTC)</span>
+          <input type="time" id="${prefix}-offpeak-start" value="${v(m.offpeak_start)}"></label>
+        <label class="field"><span>Off-peak end (UTC)</span>
+          <input type="time" id="${prefix}-offpeak-end" value="${v(m.offpeak_end)}"></label>
+      </div>
+    </div>`;
+}
+
+function collectModelPayload(prefix) {
+  const g = (k) => $(`#${prefix}-${k}`).value.trim();
+  const num = (k) => { const s = g(k); return s === "" ? null : (parseFloat(s) || 0); };
+  return {
+    name: g("name"),
+    base_url: g("base"),
+    api_key: g("key"),
+    price_in: parseFloat(g("price-in")) || 0,
+    price_out: parseFloat(g("price-out")) || 0,
+    offpeak_in: num("offpeak-in"),
+    offpeak_out: num("offpeak-out"),
+    offpeak_start: g("offpeak-start") || null,
+    offpeak_end: g("offpeak-end") || null,
+  };
+}
+
 function renderModels(models) {
   const el = $("#models-list");
   if (!models.length) {
@@ -48,13 +98,25 @@ function renderModels(models) {
     return;
   }
   el.innerHTML = models.map((m) => `
-    <div class="model-row">
-      <div class="model-info">
-        <span class="model-name">${esc(m.name)}</span>
-        <span class="muted model-base">${esc(m.base_url)}</span>
-        <span class="${m.api_key ? "ok" : "warn"}">${m.api_key ? "key set" : "no key"}</span>
+    <div class="model-card">
+      <div class="model-row">
+        <div class="model-info">
+          <span class="model-name">${esc(m.name)}</span>
+          <span class="muted model-base">${esc(m.base_url)}</span>
+          <span class="${m.api_key ? "ok" : "warn"}">${m.api_key ? "key set" : "no key"}</span>
+        </div>
+        <div class="model-row-actions">
+          <button class="btn small model-toggle" id="toggle-${m.id}" onclick="toggleModel(${m.id})" title="Edit model">▾</button>
+          <button class="btn small danger model-remove" onclick="removeModel(${m.id})" title="Remove model">−</button>
+        </div>
       </div>
-      <button class="btn small danger model-remove" onclick="removeModel(${m.id})" title="Remove model">−</button>
+      <div class="model-edit hidden" id="model-edit-${m.id}">
+        ${modelFields("model-edit-" + m.id, m)}
+        <div class="toolbar">
+          <button class="btn primary" onclick="saveModel(${m.id})">Save</button>
+          <span id="model-status-${m.id}" class="muted"></span>
+        </div>
+      </div>
     </div>
   `).join("");
 }
@@ -68,6 +130,34 @@ function renderModelSelect(models) {
   if (!models.length) sel.innerHTML = '<option value="">(no models — add one in Settings)</option>';
 }
 
+function toggleModel(id) {
+  const edit = $(`#model-edit-${id}`);
+  const btn = $(`#toggle-${id}`);
+  edit.classList.toggle("hidden");
+  btn.textContent = edit.classList.contains("hidden") ? "▾" : "▴";
+}
+
+async function saveModel(id) {
+  const payload = collectModelPayload("model-edit-" + id);
+  if (!payload.name || !payload.base_url) {
+    alert("Model id and API base URL are required.");
+    return;
+  }
+  const status = $(`#model-status-${id}`);
+  status.textContent = "Saving…";
+  try {
+    await api("/api/models/" + id, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    status.textContent = "Saved.";
+    loadModels();
+  } catch (err) {
+    status.textContent = "Error: " + err.message;
+  }
+}
+
 async function removeModel(id) {
   const m = modelMap[id];
   if (!confirm(`Remove model "${m ? m.name : id}"?`)) return;
@@ -75,19 +165,26 @@ async function removeModel(id) {
   loadModels();
 }
 
+// Add-model editor (populated in JS, shares fields with the per-model edit forms).
 $("#model-add").addEventListener("click", () => {
-  $("#model-name").value = "";
-  $("#model-base").value = "";
-  $("#model-key").value = "";
+  $("#model-editor").innerHTML = `
+    ${modelFields("model-new", {})}
+    <div class="toolbar">
+      <button class="btn primary" id="model-save">Save model</button>
+      <button class="btn" id="model-cancel">Cancel</button>
+    </div>`;
   $("#model-editor").classList.remove("hidden");
-  $("#model-name").focus();
+  $("#model-new-name").focus();
 });
-$("#model-cancel").addEventListener("click", () => $("#model-editor").classList.add("hidden"));
-$("#model-save").addEventListener("click", async () => {
-  const name = $("#model-name").value.trim();
-  const base_url = $("#model-base").value.trim();
-  const api_key = $("#model-key").value.trim();
-  if (!name || !base_url) {
+
+$("#model-editor").addEventListener("click", async (e) => {
+  if (e.target.id === "model-cancel") {
+    $("#model-editor").classList.add("hidden");
+    return;
+  }
+  if (e.target.id !== "model-save") return;
+  const payload = collectModelPayload("model-new");
+  if (!payload.name || !payload.base_url) {
     alert("Model id and API base URL are required.");
     return;
   }
@@ -95,7 +192,7 @@ $("#model-save").addEventListener("click", async () => {
     await api("/api/models", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, base_url, api_key }),
+      body: JSON.stringify(payload),
     });
     $("#model-editor").classList.add("hidden");
     loadModels();
@@ -129,6 +226,7 @@ function renderJobs(jobs) {
         <div class="job-meta">
           <span>${j.pages_done}/${j.pages_total} pages</span>
           <span>${j.blocks_found} blocks &middot; ${j.blocks_ok} translated</span>
+          <span>${j.tokens_used} tok</span>
           <span>$${(j.cost_usd || 0).toFixed(6)}</span>
         </div>
         ${j.error ? `<div class="job-error">${esc(j.error)}</div>` : ""}
@@ -248,6 +346,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---------- boot ----------
+setActiveTab(localStorage.getItem(TAB_KEY) || "jobs");
 loadJobs();
 loadSettings();
 loadModels();

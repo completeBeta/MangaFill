@@ -62,7 +62,7 @@ h2 { margin-top: 0; font-size: 17px; }
 #upload-form, .settings-form { display: flex; flex-direction: column; gap: 14px; max-width: 460px; }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field span { color: var(--muted); font-size: 13px; }
-.field input[type=text], .field input[type=password], .field select, .field input[type=file] {
+.field input[type=text], .field input[type=password], .field input[type=number], .field input[type=time], .field select, .field input[type=file] {
   background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
   padding: 8px 10px; border-radius: 6px; font-size: 14px;
 }
@@ -80,12 +80,19 @@ h2 { margin-top: 0; font-size: 17px; }
 .settings-section { border: 1px solid var(--border); border-radius: 8px; padding: 14px; background: var(--panel); }
 .settings-section h3 { margin: 0 0 10px; font-size: 15px; }
 .models-list { display: flex; flex-direction: column; gap: 8px; }
-.model-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
+.model-card { border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); overflow: hidden; }
+.model-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; }
+.model-row-actions { display: flex; gap: 6px; align-items: center; }
 .model-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .model-name { font-weight: 600; }
 .model-base { font-size: 12px; word-break: break-all; }
-.model-editor { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding: 10px; border: 1px dashed var(--border); border-radius: 6px; }
-.model-editor input { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); padding: 8px 10px; border-radius: 6px; font-size: 14px; }
+.model-toggle { width: 32px; padding: 4px 0; text-align: center; }
+.model-editor, .model-edit { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding: 10px; border: 1px dashed var(--border); border-radius: 6px; }
+.model-edit { margin-top: 0; border: none; border-top: 1px solid var(--border); border-radius: 0; }
+.model-editor input, .model-edit input { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); padding: 8px 10px; border-radius: 6px; font-size: 14px; }
+.pricing { border: 1px solid var(--border); border-radius: 6px; padding: 10px; background: var(--panel); }
+.pricing-title { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+.pricing-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 12px; }
 .ok { color: var(--ok); }
 .warn { color: var(--warn); }
 .btn.danger { border-color: var(--err); color: var(--err); }

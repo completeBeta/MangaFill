@@ -16,9 +16,10 @@ from datetime import datetime, timezone
 
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Job, Page, TextBlock
+from app.models import Job, Model, Page, TextBlock
 from app.pipeline.render import render_translated_page
 from app.services.logging import get_logger
+from app.services.pricing import compute_cost
 from app.settings_store import default_model, get_model, get_setting
 
 log = get_logger("job_engine")
@@ -34,27 +35,29 @@ def _natural_key(name: str) -> list:
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
 
 
-def resolve_translation(db, model_id=None) -> tuple[str, str, str, bool]:
-    """Return (model, base_url, api_key, dry_run) for a job's model.
+def resolve_translation(db, model_id=None) -> tuple[Model | None, bool]:
+    """Return (model, dry_run) for a job's model.
 
     Resolves `model_id` against the user's model list (falls back to the first
-    model). Falls back to the raw key file for local-dev when the model has no
-    key configured.
+    model). The caller derives name/base_url/api_key + pricing from the returned
+    `Model` object.
     """
     m = get_model(db, model_id) or default_model(db)
     dry_run = get_setting(db, "dry_run") == "true"
-    if m is None:
-        return "", "", "", dry_run
-    key = m.api_key
-    if not key:
-        env = os.path.expanduser("~/.hermes/.env")
-        if os.path.exists(env):
-            for line in open(env):
-                line = line.strip()
-                if line.startswith("DEEPSEEK_API_KEY=") or line.startswith("OPENROUTER_API_KEY="):
-                    key = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    break
-    return m.name, m.base_url, key, dry_run
+    return m, dry_run
+
+
+def _resolve_key(m: Model | None) -> str:
+    """The model's API key, with a local-dev fallback to the raw key file."""
+    if m is not None and m.api_key:
+        return m.api_key
+    env = os.path.expanduser("~/.hermes/.env")
+    if os.path.exists(env):
+        for line in open(env):
+            line = line.strip()
+            if line.startswith("DEEPSEEK_API_KEY=") or line.startswith("OPENROUTER_API_KEY="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
 
 
 def _job_dir(job_id: int) -> str:
@@ -109,7 +112,10 @@ def process_job(job_id: int) -> None:
         db.commit()
         log.info("job %s: processing %d pages (mode=%s)", job_id, job.pages_total, job.output_mode)
 
-        model, base_url, key, dry_run = resolve_translation(db, job.model_id)
+        m, dry_run = resolve_translation(db, job.model_id)
+        model = m.name if m else ""
+        base_url = m.base_url if m else ""
+        key = _resolve_key(m)
         out_dir = _out_dir(job_id)
         os.makedirs(out_dir, exist_ok=True)
         log.info("job %s: model=%s dry_run=%s", job_id, model, dry_run)
@@ -119,7 +125,9 @@ def process_job(job_id: int) -> None:
             p.status = "running"
             db.commit()
             try:
-                img, blocks, cost = render_translated_page(p.original_path, model, key, base_url, dry_run=dry_run)
+                img, blocks, pt, ct = render_translated_page(
+                    p.original_path, model, key, base_url, dry_run=dry_run
+                )
                 out_path = os.path.join(out_dir, f"{p.index:04d}.png")
                 img.save(out_path)
                 p.output_path = out_path
@@ -127,7 +135,8 @@ def process_job(job_id: int) -> None:
                 p.error = None
                 job.blocks_found += len(blocks)
                 job.blocks_ok += sum(1 for b in blocks if b.translation)
-                job.cost_usd += cost or 0.0
+                job.tokens_used += (pt or 0) + (ct or 0)
+                job.cost_usd += compute_cost(m, pt or 0, ct or 0)
                 # persist detected blocks (for the side-by-side viewer / logs)
                 for b in blocks:
                     db.add(TextBlock(

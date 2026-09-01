@@ -2,8 +2,9 @@
 
 Runtime settings (output mode, dry-run) live in the `settings` table. Translation
 models live in the `models` table — each is just an OpenAI-compatible
-{name, base_url, api_key}, so any provider works (DeepSeek, OpenRouter, OpenAI,
-Groq, a self-hosted vLLM/Ollama OpenAI endpoint, …). No provider-specific config.
+{name, base_url, api_key} with optional peak/off-peak pricing, so any provider
+works (DeepSeek, OpenRouter, OpenAI, Groq, a self-hosted vLLM/Ollama OpenAI
+endpoint, …). No provider-specific config.
 
 Config env values seed ONE default model on first boot.
 """
@@ -45,10 +46,21 @@ def set_setting(db, key: str, value) -> bool:
     return True
 
 
-# ---- models (OpenAI-compatible list) ----
+# ---- models (OpenAI-compatible list + peak/off-peak pricing) ----
 
 def _model_dict(m: Model) -> dict:
-    return {"id": m.id, "name": m.name, "base_url": m.base_url, "api_key": m.api_key}
+    return {
+        "id": m.id,
+        "name": m.name,
+        "base_url": m.base_url,
+        "api_key": m.api_key,
+        "price_in": m.price_in or 0.0,
+        "price_out": m.price_out or 0.0,
+        "offpeak_in": m.offpeak_in,
+        "offpeak_out": m.offpeak_out,
+        "offpeak_start": m.offpeak_start,
+        "offpeak_end": m.offpeak_end,
+    }
 
 
 def list_models(db) -> list[dict]:
@@ -63,13 +75,34 @@ def default_model(db) -> Model | None:
     return db.query(Model).order_by(Model.id).first()
 
 
-def add_model(db, name: str, base_url: str, api_key: str) -> dict:
+def add_model(db, name: str, base_url: str, api_key: str = "",
+              price_in: float = 0.0, price_out: float = 0.0,
+              offpeak_in: float | None = None, offpeak_out: float | None = None,
+              offpeak_start: str | None = None, offpeak_end: str | None = None) -> dict:
     m = Model(
         name=(name or "").strip(),
         base_url=(base_url or "").strip(),
         api_key=(api_key or "").strip(),
+        price_in=price_in or 0.0,
+        price_out=price_out or 0.0,
+        offpeak_in=offpeak_in,
+        offpeak_out=offpeak_out,
+        offpeak_start=offpeak_start,
+        offpeak_end=offpeak_end,
     )
     db.add(m)
+    db.commit()
+    db.refresh(m)
+    return _model_dict(m)
+
+
+def update_model(db, model_id: int, **fields) -> dict | None:
+    m = db.get(Model, model_id)
+    if m is None:
+        return None
+    for k, v in fields.items():
+        if hasattr(m, k):
+            setattr(m, k, v)
     db.commit()
     db.refresh(m)
     return _model_dict(m)

@@ -38,10 +38,14 @@ def translate_lines(
     model: str,
     api_key: str,
     base_url: str = "https://openrouter.ai/api/v1",
-) -> tuple[list[str], float]:
-    """Translate a batch of JP lines to EN. Returns (translations, cost_usd)."""
+) -> tuple[list[str], int, int]:
+    """Translate a batch of JP lines to EN.
+
+    Returns (translations, prompt_tokens, completion_tokens) — the token counts
+    come from the API `usage` object so the caller can price the call.
+    """
     if not lines:
-        return [], 0.0
+        return [], 0, 0
 
     user = "Translate these manga lines:\n" + "\n".join(
         f"{i + 1}. {t}" for i, t in enumerate(lines)
@@ -70,10 +74,12 @@ def translate_lines(
     resp.raise_for_status()
     data = resp.json()
     content = data["choices"][0]["message"].get("content") or ""
-    cost = data.get("usage", {}).get("cost", 0.0)
+    usage = data.get("usage", {}) or {}
+    prompt_tokens = usage.get("prompt_tokens", 0) or 0
+    completion_tokens = usage.get("completion_tokens", 0) or 0
 
     translations = _parse_numbered(content, len(lines))
-    return translations, cost
+    return translations, prompt_tokens, completion_tokens
 
 
 def translate_page(
@@ -81,18 +87,19 @@ def translate_page(
     model: str,
     api_key: str,
     base_url: str = "https://openrouter.ai/api/v1",
-) -> tuple[list[TextBlock], float]:
+) -> tuple[list[TextBlock], int, int]:
     """Translate the translatable blocks (vertical dialogue) of a page.
 
     Furigana and horizontal text (titles/watermarks) are intentionally skipped.
+    Returns (blocks, prompt_tokens, completion_tokens).
     """
     translatable = [b for b in blocks if b.orientation == "vertical" and b.text]
     if not translatable:
-        return blocks, 0.0
+        return blocks, 0, 0
 
-    translations, cost = translate_lines(
+    translations, pt, ct = translate_lines(
         [b.text for b in translatable], model, api_key, base_url
     )
     for b, en in zip(translatable, translations):
         b.translation = en
-    return blocks, cost
+    return blocks, pt, ct

@@ -42,3 +42,15 @@ def init_db() -> None:
         cols = [r[1] for r in conn.exec_driver_sql("PRAGMA table_info(jobs)")]
         if "model_id" not in cols:
             conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN model_id INTEGER")
+
+        mcols = [r[1] for r in conn.exec_driver_sql("PRAGMA table_info(models)")]
+        for col, ddl in [
+            ("price_in", "REAL DEFAULT 0"),
+            ("price_out", "REAL DEFAULT 0"),
+            ("offpeak_in", "REAL"),
+            ("offpeak_out", "REAL"),
+            ("offpeak_start", "VARCHAR"),
+            ("offpeak_end", "VARCHAR"),
+        ]:
+            if col not in mcols:
+                conn.exec_driver_sql(f"ALTER TABLE models ADD COLUMN {col} {ddl}")
