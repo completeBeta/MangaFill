@@ -28,7 +28,7 @@ function setActiveTab(name) {
 function switchTab(name) {
   setActiveTab(name);
   if (name === "logs") loadLogs();
-  if (name === "settings") { loadSettings(); loadModels(); }
+  if (name === "settings") { loadSettings(); loadModels(); loadFonts(); }
 }
 
 // ---------- tabs ----------
@@ -285,6 +285,57 @@ async function loadSettings() {
   $("#settings-dry-run").checked = s.dry_run === "true";
 }
 
+// ---------- fonts ----------
+async function loadFonts() {
+  const data = await api("/api/fonts");
+  const selected = data.selected;
+  $("#fonts-list").innerHTML = data.fonts.map((f) => {
+    const disabled = !f.available;
+    const badge = f.default ? ' <span class="badge">default</span>' : "";
+    const swatch = f.available
+      ? `<img class="font-preview" src="/api/fonts/preview/${f.id}" alt="${esc(f.name)} preview">`
+      : `<div class="font-preview placeholder">unavailable</div>`;
+    const checked = f.id === selected && !disabled;
+    return `
+      <label class="font-card${disabled ? " unavailable" : ""}">
+        <input type="radio" name="font" value="${f.id}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>
+        ${swatch}
+        <div class="font-info">
+          <span class="font-name">${esc(f.name)}${badge}</span>
+          <span class="font-style">${esc(f.style)}</span>
+          <span class="font-license">${esc(f.license)}</span>
+        </div>
+      </label>`;
+  }).join("");
+  // Surface the effective fallback when the selected face is unavailable.
+  const note = $("#fonts-note");
+  if (data.resolved && data.resolved !== data.selected) {
+    const effective = (data.fonts.find((f) => f.id === data.resolved) || {}).name || "DejaVu";
+    note.textContent = "Selected font unavailable — using " + effective + " instead.";
+  } else {
+    note.textContent = "";
+  }
+  document.querySelectorAll('input[name="font"]').forEach((r) => {
+    r.addEventListener("change", () => saveFont(r.value));
+  });
+}
+
+async function saveFont(id) {
+  const status = $("#fonts-status");
+  status.textContent = "Saving\u2026";
+  try {
+    await api("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ font: id }),
+    });
+    status.textContent = "Saved.";
+    setTimeout(() => (status.textContent = ""), 1500);
+  } catch (err) {
+    status.textContent = "Error: " + err.message;
+  }
+}
+
 $("#settings-save").addEventListener("click", async () => {
   const payload = {
     output_mode: $("#settings-mode").value,
@@ -353,4 +404,5 @@ setActiveTab(localStorage.getItem(TAB_KEY) || "jobs");
 loadJobs();
 loadSettings();
 loadModels();
+loadFonts();
 setInterval(loadJobs, 2500);

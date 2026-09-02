@@ -14,10 +14,12 @@ import os
 
 from app.config import settings as cfg
 from app.models import Model, Setting
+from app.pipeline.fonts import FONT_CATALOG, default_font_id
 
 SETTINGS: dict[str, tuple[str, tuple | None]] = {
     "output_mode": ("folder", ("folder", "cbz", "mirror")),
     "dry_run": ("true", ("true", "false")),
+    "font": (default_font_id() or "anime-ace", tuple(f["id"] for f in FONT_CATALOG)),
 }
 
 

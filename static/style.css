@@ -79,6 +79,7 @@ h2 { margin-top: 0; font-size: 17px; }
 /* Settings sections + model list */
 .settings-section { border: 1px solid var(--border); border-radius: 8px; padding: 14px; background: var(--panel); }
 .settings-section h3 { margin: 0 0 10px; font-size: 15px; }
+.settings-section p.muted { margin: 0 0 10px; font-size: 13px; }
 .models-list { display: flex; flex-direction: column; gap: 8px; }
 .model-card { border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); overflow: hidden; }
 .model-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; }
@@ -98,6 +99,31 @@ h2 { margin-top: 0; font-size: 17px; }
 .btn.danger { border-color: var(--err); color: var(--err); }
 .btn.danger:hover { background: var(--err); color: #fff; }
 .badge.muted { color: var(--muted); }
+
+/* Fonts list (Settings) */
+.fonts-list { display: flex; flex-direction: column; gap: 8px; }
+.font-card {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--panel-2); padding: 8px 12px; cursor: pointer;
+}
+.font-card:hover { border-color: var(--accent); }
+.font-card input[type=radio] { flex-shrink: 0; accent-color: var(--accent); }
+.font-preview {
+  flex-shrink: 0; height: 44px; max-width: 220px; object-fit: contain;
+  background: #fff; border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px;
+}
+.font-preview.placeholder {
+  display: flex; align-items: center; justify-content: center;
+  width: 130px; height: 44px; color: var(--muted); font-size: 12px;
+  background: var(--panel); border: 1px dashed var(--border);
+}
+.font-info { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.font-name { font-weight: 600; }
+.font-style { font-size: 13px; }
+.font-license { color: var(--muted); font-size: 12px; }
+.font-card.unavailable { opacity: 0.5; cursor: not-allowed; }
+.font-card.unavailable:hover { border-color: var(--border); }
 
 /* Jobs list */
 .jobs-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }

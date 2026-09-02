@@ -57,6 +57,7 @@ def render_translated_page(
     api_key: str,
     base_url: str = "https://openrouter.ai/api/v1",
     dry_run: bool = False,
+    font_id: str | None = None,
 ) -> tuple[Image.Image, list[TextBlock], int, int]:
     """Run the full pipeline on one page.
 
@@ -147,5 +148,5 @@ def render_translated_page(
     inpainted = inpaint_text(image, erase) if erase else image
     only = {id(b) for b, _region in targets}
     regions = {id(b): region for b, region in targets if region is not None}
-    result = typeset_page(inpainted, blocks, regions=regions, only=only)
+    result = typeset_page(inpainted, blocks, font_id=font_id, regions=regions, only=only)
     return result, blocks, pt, ct

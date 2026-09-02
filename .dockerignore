@@ -9,7 +9,7 @@ config
 data
 uploads
 hf-cache
-fonts/*
+fonts/AnimeAce-*
 tests
 *.db
 .pytest_cache

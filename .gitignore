@@ -9,10 +9,11 @@ uploads/
 *.db
 *.sqlite
 
-# Font files — licensed faces are volume-mounted (fonts/ or /app/fonts), never
-# committed/redistributed. The directory is kept alive by .gitkeep.
-fonts/*
-!fonts/.gitkeep
+# Font files — bundled OFL faces ARE committed (fonts/Bangers-*, ComicNeue-*,
+# PatrickHand-*, GloriaHallelujah-* + their OFL licenses). Only the
+# non-redistributable Blambot font (Anime Ace) is kept out of git — it's pulled
+# at build time into /app/fonts (see Dockerfile).
+fonts/AnimeAce-*
 
 # Python
 __pycache__/

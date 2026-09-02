@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app import __version__
-from app.api import jobs, logs, models, pages, settings as settings_api
+from app.api import fonts as fonts_api, jobs, logs, models, pages, settings as settings_api
 from app.db import init_db, SessionLocal
 from app.services.logging import get_logger, setup_logging
 from app.settings_store import seed_default_model
@@ -44,6 +44,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(jobs.router)
 app.include_router(pages.router)
 app.include_router(settings_api.router)
+app.include_router(fonts_api.router)
 app.include_router(models.router)
 app.include_router(logs.router)
 

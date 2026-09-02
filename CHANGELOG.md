@@ -2,6 +2,12 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.14.0] - 2026-09-02
+
+### Added
+- **Font picker in Settings** — a new "Fonts" section lists every lettering face with a live preview (rendered server-side from the actual font file), its style, and its license. Selecting one persists it and drives typesetting. Default = Anime Ace (manga hand-lettering); four bundled SIL OFL faces (Comic Neue, Bangers, Patrick Hand, Gloria Hallelujah) are committed to the repo as guaranteed fallbacks.
+- **Font fallback + greyed-out state** — if the selected font is unavailable (e.g. Anime Ace's build-time pull failed), the app resolves to the next available face and greys the missing entry out in the UI (with an "using X instead" note). Typesetting never fails for lack of a font: selected → default → first bundled → DejaVu Sans Bold.
+
 ## [0.13.1] - 2026-09-02
 
 ### Changed
