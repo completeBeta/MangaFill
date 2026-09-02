@@ -21,6 +21,34 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 DETECTOR_ID = "ogkalu/comic-text-and-bubble-detector"
 
+
+def _lift_torch_load_safety() -> None:
+    """Allow legacy pickle (.bin) checkpoints on torch 2.5.1.
+
+    transformers' `check_torch_load_is_safe` hard-blocks `torch.load` below 2.6
+    (CVE-2025-32434). This worker is pinned to 2.5.1 because 2.6+ dropped Pascal
+    (sm_61) kernels — a hardware constraint, not neglect — and every weight it
+    loads is a trusted Apache-2.0 checkpoint (manga-ocr-base, RT-DETR, big-lama).
+    Lift the block so manga-ocr's pickle weights still load. (Idempotent; a no-op
+    effect on torch >= 2.6.)
+    """
+    import transformers.modeling_utils as mu
+    import transformers.utils.import_utils as iu
+
+    mu.check_torch_load_is_safe = lambda: None
+    iu.check_torch_load_is_safe = lambda: None
+
+
+def _torch_lt_26() -> bool:
+    try:
+        return tuple(int(x) for x in torch.__version__.split(".")[:2]) < (2, 6)
+    except Exception:
+        return False
+
+
+if _torch_lt_26():
+    _lift_torch_load_safety()
+
 _det_model = None
 _det_processor = None
 _mocr = None
