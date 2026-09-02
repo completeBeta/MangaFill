@@ -138,6 +138,9 @@ h2 { margin-top: 0; font-size: 17px; }
 .badge.done { color: var(--ok); }
 .badge.partial { color: var(--warn); }
 .badge.failed { color: var(--err); }
+.badge.paused { color: var(--warn); }
+.badge.cancelled { color: var(--err); }
+.toolbar-actions { display: flex; gap: 8px; align-items: center; }
 .progress { height: 6px; background: var(--panel-2); border-radius: 3px; margin: 8px 0; overflow: hidden; }
 .progress > span { display: block; height: 100%; background: var(--accent); transition: width .3s; }
 .job-meta { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 13px; }

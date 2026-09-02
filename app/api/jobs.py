@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import zipfile
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -10,9 +11,20 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import Job, Page
-from app.services.job_engine import _job_dir, _out_dir, _natural_key, ingest_upload
+from app.services.job_engine import (
+    _delete_job_files,
+    _job_dir,
+    _out_dir,
+    _natural_key,
+    clear_all_jobs,
+    ingest_upload,
+)
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _job_dict(job: Job, with_pages: bool = False) -> dict:
@@ -91,9 +103,57 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
+    _delete_job_files(job_id)
     db.delete(job)
     db.commit()
     return {"ok": True}
+
+
+@router.delete("")
+def clear_all(db: Session = Depends(get_db)):
+    """Delete every job — DB rows and on-disk files."""
+    n = clear_all_jobs(db)
+    return {"ok": True, "deleted": n}
+
+
+@router.post("/{job_id}/start")
+def start_job(job_id: int, db: Session = Depends(get_db)):
+    """Resume a paused job, or retry a cancelled/failed one."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if job.status in ("paused", "cancelled", "failed"):
+        job.status = "queued"
+        job.error = None
+        job.finished_at = None
+        job.updated_at = _now()
+        db.commit()
+    return _job_dict(job)
+
+
+@router.post("/{job_id}/pause")
+def pause_job(job_id: int, db: Session = Depends(get_db)):
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if job.status == "running":
+        job.status = "paused"
+        job.updated_at = _now()
+        db.commit()
+    return _job_dict(job)
+
+
+@router.post("/{job_id}/stop")
+def stop_job(job_id: int, db: Session = Depends(get_db)):
+    """Cancel a queued/running/paused job (worker stops between pages)."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if job.status in ("queued", "running", "paused"):
+        job.status = "cancelled"
+        job.updated_at = _now()
+        db.commit()
+    return _job_dict(job)
 
 
 @router.get("/{job_id}/download")

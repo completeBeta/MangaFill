@@ -28,7 +28,7 @@ function setActiveTab(name) {
 function switchTab(name) {
   setActiveTab(name);
   if (name === "logs") loadLogs();
-  if (name === "settings") { loadSettings(); loadModels(); loadFonts(); }
+  if (name === "settings") { loadSettings(); loadModels(); loadFonts(); loadGpu(); }
 }
 
 // ---------- tabs ----------
@@ -202,7 +202,7 @@ $("#model-editor").addEventListener("click", async (e) => {
 });
 
 // ---------- jobs ----------
-const BADGE = { queued: "queued", running: "running", done: "done", partial: "partial", failed: "failed" };
+const BADGE = { queued: "queued", running: "running", done: "done", partial: "partial", failed: "failed", paused: "paused", cancelled: "cancelled" };
 
 function renderJobs(jobs) {
   const el = $("#jobs-list");
@@ -212,7 +212,6 @@ function renderJobs(jobs) {
   }
   el.innerHTML = jobs.map((j) => {
     const pct = j.pages_total ? Math.round((100 * j.pages_done) / j.pages_total) : 0;
-    const viewable = j.status === "done" || j.status === "partial";
     const modelName = modelMap[j.model_id] ? modelMap[j.model_id].name : "default";
     return `
       <div class="job ${j.error ? "error-box" : ""}">
@@ -230,11 +229,7 @@ function renderJobs(jobs) {
           <span>$${(j.cost_usd || 0).toFixed(6)}</span>
         </div>
         ${j.error ? `<div class="job-error">${esc(j.error)}</div>` : ""}
-        <div class="job-actions">
-          ${viewable ? `<button class="btn small" onclick="openViewer(${j.id})">View</button>` : ""}
-          ${viewable ? `<a class="btn small" href="/api/jobs/${j.id}/download">Download</a>` : ""}
-          <button class="btn small" onclick="deleteJob(${j.id})">Delete</button>
-        </div>
+        <div class="job-actions">${jobActions(j)}</div>
       </div>`;
   }).join("");
 }
@@ -249,7 +244,35 @@ async function deleteJob(id) {
   loadJobs();
 }
 
+function jobActions(j) {
+  const b = [];
+  if (j.status === "running") b.push(`<button class="btn small" onclick="pauseJob(${j.id})">Pause</button>`);
+  if (["paused", "cancelled", "failed"].includes(j.status)) b.push(`<button class="btn small" onclick="startJob(${j.id})">Start</button>`);
+  if (["queued", "running", "paused"].includes(j.status)) b.push(`<button class="btn small" onclick="stopJob(${j.id})">Stop</button>`);
+  if (j.status === "done" || j.status === "partial") {
+    b.push(`<button class="btn small" onclick="openViewer(${j.id})">View</button>`);
+    b.push(`<a class="btn small" href="/api/jobs/${j.id}/download">Download</a>`);
+  }
+  b.push(`<button class="btn small" onclick="deleteJob(${j.id})">Delete</button>`);
+  return b.join("");
+}
+
+async function jobAction(id, action) {
+  await api(`/api/jobs/${id}/${action}`, { method: "POST" });
+  loadJobs();
+}
+function startJob(id) { jobAction(id, "start"); }
+function pauseJob(id) { jobAction(id, "pause"); }
+function stopJob(id) { jobAction(id, "stop"); }
+
+async function clearAllJobs() {
+  if (!confirm("Delete ALL jobs and their files? This cannot be undone.")) return;
+  await api("/api/jobs", { method: "DELETE" });
+  loadJobs();
+}
+
 $("#refresh-jobs").addEventListener("click", loadJobs);
+$("#clear-all-jobs").addEventListener("click", clearAllJobs);
 
 // ---------- upload ----------
 $("#upload-form").addEventListener("submit", async (e) => {
@@ -356,6 +379,34 @@ $("#settings-save").addEventListener("click", async () => {
   }
 });
 
+// ---------- gpu ----------
+async function loadGpu() {
+  const g = await api("/api/gpu");
+  $("#gpu-worker-url").value = g.worker_url || "";
+  const badge = $("#gpu-status-badge");
+  badge.textContent = g.device === "gpu" ? "GPU" : (g.worker_url ? g.status : "CPU only");
+  badge.className = "badge " + (g.status === "connected" ? "done" : g.status === "unreachable" ? "failed" : "muted");
+}
+
+async function saveGpu() {
+  const url = $("#gpu-worker-url").value.trim();
+  const status = $("#gpu-status");
+  status.textContent = "Saving\u2026";
+  try {
+    await api("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gpu_worker_url: url }),
+    });
+    status.textContent = "Saved.";
+    setTimeout(() => (status.textContent = ""), 1500);
+    loadGpu();
+  } catch (err) {
+    status.textContent = "Error: " + err.message;
+  }
+}
+$("#gpu-save").addEventListener("click", saveGpu);
+
 // ---------- logs ----------
 async function loadLogs() {
   const lines = $("#logs-lines").value;
@@ -405,4 +456,5 @@ loadJobs();
 loadSettings();
 loadModels();
 loadFonts();
+loadGpu();
 setInterval(loadJobs, 2500);

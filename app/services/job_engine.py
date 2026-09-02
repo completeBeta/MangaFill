@@ -12,7 +12,7 @@ import os
 import re
 import shutil
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.config import settings
 from app.db import SessionLocal
@@ -71,6 +71,13 @@ def _orig_dir(job_id: int) -> str:
 
 def _out_dir(job_id: int) -> str:
     return os.path.join(_job_dir(job_id), "output")
+
+
+def _delete_job_files(job_id: int) -> None:
+    """Remove a job's on-disk directory (original + output + archives)."""
+    d = _job_dir(job_id)
+    if os.path.isdir(d):
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def _stream_to(path: str, src) -> None:
@@ -160,7 +167,18 @@ def process_job(job_id: int) -> None:
         log.info("job %s: model=%s dry_run=%s", job_id, model, dry_run)
 
         pages = db.query(Page).filter(Page.job_id == job_id).order_by(Page.index).all()
+        stopped = False
         for p in pages:
+            # Respect stop/pause set from the API mid-run (fresh read from DB).
+            try:
+                db.refresh(job)
+            except Exception:
+                return  # job row deleted (e.g. clear-all) — bail out
+            if job.status in ("cancelled", "paused"):
+                stopped = True
+                break
+            if p.status == "done":
+                continue  # resume: skip pages already translated
             p.status = "running"
             db.commit()
             try:
@@ -195,6 +213,11 @@ def process_job(job_id: int) -> None:
                 log.warning("job %s page %d failed: %s", job_id, p.index, e)
             job.updated_at = _now()
             db.commit()
+
+        if stopped:
+            db.commit()
+            log.info("job %s stopped early (status=%s)", job_id, job.status)
+            return
 
         # Final status + output mode.
         done = db.query(Page).filter(Page.job_id == job_id, Page.status == "done").count()
@@ -249,3 +272,40 @@ def assemble_archive(job_id: int, ext: str) -> str | None:
         for name in pages:
             zf.write(os.path.join(out_dir, name), arcname=name)
     return None
+
+
+def _parse_dt(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def purge_old_jobs(db, days: int = 7) -> int:
+    """Delete jobs (DB rows + on-disk files) whose created_at is older than `days`.
+
+    Runs periodically from the worker. Returns the number purged.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    purged = 0
+    for job in db.query(Job).all():
+        created = _parse_dt(job.created_at)
+        if created is not None and created < cutoff:
+            _delete_job_files(job.id)
+            db.delete(job)
+            purged += 1
+    if purged:
+        db.commit()
+    return purged
+
+
+def clear_all_jobs(db) -> int:
+    """Delete every job (DB rows + on-disk files). Returns the count removed."""
+    jobs = db.query(Job).all()
+    for job in jobs:
+        _delete_job_files(job.id)
+        db.delete(job)
+    db.commit()
+    return len(jobs)

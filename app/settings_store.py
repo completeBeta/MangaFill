@@ -20,6 +20,7 @@ SETTINGS: dict[str, tuple[str, tuple | None]] = {
     "output_mode": ("folder", ("folder", "cbz", "mirror")),
     "dry_run": ("true", ("true", "false")),
     "font": (default_font_id() or "anime-ace", tuple(f["id"] for f in FONT_CATALOG)),
+    "gpu_worker_url": ("", None),  # e.g. http://10.10.10.5:9001 (remote vision worker)
 }
 
 

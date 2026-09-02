@@ -6,13 +6,17 @@ page at a time). All state lives in SQLite, so the worker can be restarted freel
 from __future__ import annotations
 
 import threading
+import time
 
 from app.db import SessionLocal
 from app.models import Job
-from app.services.job_engine import process_job
+from app.services.job_engine import process_job, purge_old_jobs
 from app.services.logging import get_logger
 
 log = get_logger("worker")
+
+PURGE_INTERVAL_S = 3600  # run the 7-day retention purge hourly
+RETENTION_DAYS = 7
 
 
 class Worker:
@@ -45,8 +49,24 @@ class Worker:
         finally:
             db.close()
 
+    def _purge_old(self) -> None:
+        db = SessionLocal()
+        try:
+            n = purge_old_jobs(db, days=RETENTION_DAYS)
+            if n:
+                log.info("retention: purged %d job(s) older than %d days", n, RETENTION_DAYS)
+        except Exception as e:  # pragma: no cover - defensive
+            log.warning("retention purge failed: %s", e)
+        finally:
+            db.close()
+
     def _run(self) -> None:
+        last_purge = 0.0
         while not self._stop.is_set():
+            now = time.time()
+            if now - last_purge > PURGE_INTERVAL_S:
+                self._purge_old()
+                last_purge = now
             job_id = self._claim_next()
             if job_id is None:
                 self._stop.wait(self._interval)

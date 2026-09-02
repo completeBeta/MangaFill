@@ -24,7 +24,10 @@
     <section id="tab-jobs" class="panel active">
       <div class="toolbar">
         <h2>Jobs</h2>
-        <button id="refresh-jobs" class="btn">Refresh</button>
+        <div class="toolbar-actions">
+          <button id="clear-all-jobs" class="btn danger small">Clear all</button>
+          <button id="refresh-jobs" class="btn">Refresh</button>
+        </div>
       </div>
       <div id="jobs-list" class="jobs-list">
         <p class="muted">No jobs yet — upload some pages.</p>
@@ -82,6 +85,22 @@
           <p class="muted">Lettering face for translated dialogue. Anime Ace (pulled at build) is the default manga look; the bundled OFL fonts are always-available fallbacks.</p>
           <div id="fonts-list" class="fonts-list"></div>
           <div id="fonts-note" class="warn"></div>
+        </div>
+
+        <div class="settings-section">
+          <div class="toolbar">
+            <h3>GPU</h3>
+            <span id="gpu-status-badge" class="badge muted">CPU only</span>
+          </div>
+          <p class="muted">Vision acceleration (detect / OCR / inpaint) can run on a remote GPU worker; translation stays on the cloud. Leave the URL blank for CPU-only.</p>
+          <label class="field">
+            <span>GPU worker URL</span>
+            <input type="text" id="gpu-worker-url" placeholder="e.g. http://10.10.10.5:9001">
+          </label>
+          <div class="toolbar">
+            <button id="gpu-save" class="btn primary small">Save GPU settings</button>
+            <span id="gpu-status" class="muted"></span>
+          </div>
         </div>
 
         <div class="settings-section">

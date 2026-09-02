@@ -2,6 +2,16 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.15.0] - 2026-09-02
+
+### Added
+- **Job controls** — Start/Resume, Pause, and Stop (cancel) buttons per job, plus a "Clear all" button in the Jobs toolbar. The worker respects pause/cancel between pages; paused/cancelled/failed jobs can be restarted (already-translated pages are skipped on resume).
+- **1-week retention purge** — the worker deletes jobs (DB rows + on-disk files) older than 7 days, hourly.
+- **GPU section in Settings** — shows the current device plus a GPU worker URL field with a live reachability check (CPU only / connected / unreachable). The vision GPU (detect/OCR/inpaint) can be wired to a remote worker later; translation stays cloud-only.
+
+### Fixed
+- **delete_job now removes the job's files on disk** (previously it leaked original/output pages).
+
 ## [0.14.1] - 2026-09-02
 
 ### Fixed
