@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.14.1] - 2026-09-02
+
+### Fixed
+- **Removed the obsolete `./fonts:/app/fonts` volume mount** — it shadowed the image's baked fonts, so the bundled OFL faces (and the build-time-pulled Anime Ace) never reached the container on a fresh deploy, silently falling back to DejaVu. Fonts now ship via the image (OFL committed + Anime Ace pulled at build).
+
 ## [0.14.0] - 2026-09-02
 
 ### Added

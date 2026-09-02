@@ -10,6 +10,5 @@ services:
       - ./data:/data
       - ./uploads:/input
       - ./config:/app/config
-      - ./fonts:/app/fonts
       - ./hf-cache:/root/.cache/huggingface   # persist downloaded models (manga-ocr, detector, LaMa)
     restart: unless-stopped
