@@ -451,7 +451,9 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---------- boot ----------
-setActiveTab(localStorage.getItem(TAB_KEY) || "jobs");
+const bootTab = localStorage.getItem(TAB_KEY) || "jobs";
+setActiveTab(bootTab);
+if (bootTab === "logs") loadLogs(); // restore log content on refresh, not just the tab
 loadJobs();
 loadSettings();
 loadModels();

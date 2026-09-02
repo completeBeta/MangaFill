@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.15.4] - 2026-09-02
+
+### Fixed
+- **Logs page was empty after a page refresh** — the dashboard restored the *active tab* from `localStorage` on reload but never re-fetched the log content, so refreshing while on the Logs tab showed a blank view. The boot sequence now reloads logs when the Logs tab is the restored tab.
+
 ## [0.15.3] - 2026-09-02
 
 ### Changed
