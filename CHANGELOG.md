@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.15.1] - 2026-09-02
+
+### Fixed
+- **GPU worker URL example uses a generic hostname** (`gpu-host`) instead of a hard-coded internal IP.
+
 ## [0.15.0] - 2026-09-02
 
 ### Added

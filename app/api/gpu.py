@@ -1,6 +1,6 @@
 """GPU status endpoint — the vision GPU (detect/OCR/inpaint) lives on a separate
-host (10.10.10.5) as a remote worker, wired later. This endpoint reports the
-current device + whether a remote worker URL is configured and reachable.
+host as a remote worker, wired later. This endpoint reports the current device
+plus whether a remote worker URL is configured and reachable.
 """
 from __future__ import annotations
 

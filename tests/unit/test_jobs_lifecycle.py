@@ -61,8 +61,8 @@ def test_gpu_worker_url_setting():
     try:
         from app.settings_store import get_setting, set_setting
 
-        assert set_setting(db, "gpu_worker_url", "http://10.0.0.5:9001") is True
+        assert set_setting(db, "gpu_worker_url", "http://gpu-host:9001") is True
         db.commit()
-        assert get_setting(db, "gpu_worker_url") == "http://10.0.0.5:9001"
+        assert get_setting(db, "gpu_worker_url") == "http://gpu-host:9001"
     finally:
         db.close()
