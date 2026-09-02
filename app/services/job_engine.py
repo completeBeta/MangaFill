@@ -88,6 +88,20 @@ def _stream_to(path: str, src) -> None:
             out.write(chunk)
 
 
+def _save_output(img, out_dir: str, original_path: str) -> str:
+    """Save a rendered page preserving the ORIGINAL filename + extension.
+
+    The user wants output names to mirror the input, not be renumbered to
+    `0000.png`. PIL infers the format from the extension; JPEG needs RGB.
+    """
+    base = os.path.basename(original_path)
+    out_path = os.path.join(out_dir, base)
+    if base.lower().endswith((".jpg", ".jpeg")) and img.mode != "RGB":
+        img = img.convert("RGB")
+    img.save(out_path)
+    return out_path
+
+
 def ingest_upload(job_id: int, files: list) -> tuple[list[str], str]:
     """Save uploaded files (images and/or a .cbz/.zip) to the job's original dir,
     in natural reading order. Returns (page_paths, source_format).
@@ -152,8 +166,7 @@ def process_job(job_id: int) -> None:
                 img, blocks, pt, ct = render_translated_page(
                     p.original_path, model, key, base_url, dry_run=dry_run
                 )
-                out_path = os.path.join(out_dir, f"{p.index:04d}.png")
-                img.save(out_path)
+                out_path = _save_output(img, out_dir, p.original_path)
                 p.output_path = out_path
                 p.status = "done"
                 p.error = None

@@ -5,8 +5,10 @@ import io
 import os
 import zipfile
 
+from PIL import Image
+
 from app.config import settings
-from app.services.job_engine import _assemble, ingest_upload
+from app.services.job_engine import _assemble, _save_output, ingest_upload
 
 
 class _FakeUpload:
@@ -74,3 +76,10 @@ def test_assemble_mirrors_input_format(tmp_path, monkeypatch):
     # explicit cbz mode always -> .cbz
     assert _assemble(1, "cbz", "folder") is None
     assert os.path.exists(os.path.join(str(tmp_path), "1", "translated.cbz"))
+
+
+def test_save_output_preserves_filename(tmp_path):
+    img = Image.new("RGB", (12, 12), "white")
+    out = _save_output(img, str(tmp_path), "/some/job/original/page-033.jpg")
+    assert os.path.basename(out) == "page-033.jpg"
+    assert os.path.exists(out)

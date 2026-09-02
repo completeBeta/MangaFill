@@ -2,6 +2,12 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.12.1] - 2026-09-01
+
+### Fixed
+- **Upload 500 "database is locked"** — the SQLite engine now runs in WAL mode with a 30s `busy_timeout`, so dashboard polling + worker commits no longer collide. `create_job` also holds the job in an `uploading` state until the archive is fully ingested, so the worker can't claim a half-ingested job.
+- **Output filenames preserved** — rendered pages keep the original filename + extension instead of being renumbered to `0000.png`.
+
 ## [0.12.0] - 2026-09-01
 
 ### Added

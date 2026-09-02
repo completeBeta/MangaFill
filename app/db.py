@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings
@@ -21,8 +21,23 @@ def _db_url() -> str:
     return f"sqlite:///{path}"
 
 
-engine = create_engine(_db_url(), connect_args={"check_same_thread": False})
+engine = create_engine(
+    _db_url(),
+    connect_args={"check_same_thread": False, "timeout": 30},  # busy_timeout = 30s
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+@event.listens_for(engine, "connect")
+def _sqlite_pragmas(dbapi_conn, connection_record):
+    """WAL + busy_timeout so concurrent reads (dashboard polling) never hit
+    "database is locked" while the worker writes — and writers wait instead of
+    failing immediately. synchronous=NORMAL is the standard WAL durability tradeoff."""
+    cur = dbapi_conn.cursor()
+    cur.execute("PRAGMA journal_mode=WAL")
+    cur.execute("PRAGMA busy_timeout=30000")
+    cur.execute("PRAGMA synchronous=NORMAL")
+    cur.close()
 
 
 def get_db():

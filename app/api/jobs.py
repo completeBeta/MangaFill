@@ -50,7 +50,9 @@ def create_job(
 ):
     if output_mode not in ("folder", "cbz", "mirror"):
         output_mode = "folder"
-    job = Job(source="upload", name=name, output_mode=output_mode, model_id=model_id)
+    # status="uploading" so the worker can't claim a half-ingested job (the
+    # archive is streamed below before the pages are attached).
+    job = Job(source="upload", name=name, output_mode=output_mode, model_id=model_id, status="uploading")
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -65,6 +67,7 @@ def create_job(
         db.add(Page(job_id=job.id, index=i, original_path=p))
     job.name = job.name or os.path.splitext(os.path.basename(paths[0]))[0]
     job.pages_total = len(paths)
+    job.status = "queued"  # fully ingested — now claimable
     db.commit()
     db.refresh(job)
     return _job_dict(job, with_pages=True)
