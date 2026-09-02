@@ -20,8 +20,9 @@ pipeline:
     solid_threshold: 0.06   # std-dev below → cheap fill, above → LaMa
   typeset:
     # Font is auto-detected: $MANGA_FILL_FONT override, then any .ttf/.otf in
-    # fonts/ (repo) or /app/fonts (container volume mount — e.g. a licensed
-    # Wild Words / Anime Ace face), then DejaVu Sans Bold as fallback.
+    # fonts/ or /app/fonts, then DejaVu Sans Bold as fallback. The Docker image
+    # auto-pulls Anime Ace (Blambot, freeware/non-profit) into /app/fonts at
+    # build time; mount a licensed face there to override it (e.g. Wild Words).
     font: /app/fonts/comic.ttf
     min_font_pt: 10
     outline_width: 2

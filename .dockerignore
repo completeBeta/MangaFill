@@ -9,8 +9,7 @@ config
 data
 uploads
 hf-cache
-fonts/*.ttf
-fonts/*.otf
+fonts/*
 tests
 *.db
 .pytest_cache

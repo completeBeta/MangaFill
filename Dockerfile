@@ -7,14 +7,29 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Native deps for OpenCV/Pillow + DejaVu fonts (lettering fallback when no font
-# is mounted at /app/fonts; the slim base image ships no fonts).
+# Native deps for OpenCV/Pillow + curl (font pull) + DejaVu fonts (lettering
+# fallback when the manga font can't be pulled; slim base ships no fonts).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
         libgomp1 \
+        curl \
         fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
+
+# Manga lettering font — Anime Ace (Blambot). Its license (freeware for
+# non-profit use, NO redistribution) forbids committing the .ttf to the repo,
+# so it's pulled at build time — the same pattern as the model weights (which
+# come from HuggingFace, not from git). Best-effort: if the fetch fails the
+# build still succeeds and typeset falls back to DejaVu Sans Bold. A font
+# mounted at /app/fonts still takes precedence via $MANGA_FILL_FONT / the
+# resolution order in app/pipeline/typeset.py.
+RUN mkdir -p /app/fonts \
+    && ( curl -fsSL --max-time 60 -o /app/fonts/AnimeAce-Regular.ttf \
+            "https://st.1001fonts.net/download/font/anime-ace.regular.ttf" \
+         && curl -fsSL --max-time 60 -o /app/fonts/AnimeAce-LICENSE.txt \
+            "https://st.1001fonts.net/license/anime-ace/font%20info.txt" \
+         || echo "WARN: Anime Ace pull failed — typeset will use DejaVu Sans Bold" )
 
 # ---- ML deps first (cached separately from the code COPY) -----------------
 # Torch must be CPU-only (PyPI's default pulls a ~2.5 GB CUDA build that can't

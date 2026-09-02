@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.13.1] - 2026-09-02
+
+### Changed
+- **Font ships via build-time pull, not a manual mount** — the Docker image now pulls Anime Ace (Blambot) into `/app/fonts` during `docker build` (the same pattern as the HuggingFace model weights), so no deploy-time font mount step is needed. The fetch is best-effort with a DejaVu fallback; a licensed face mounted at `/app/fonts` still overrides it.
+
 ## [0.13.0] - 2026-09-02
 
 ### Added
