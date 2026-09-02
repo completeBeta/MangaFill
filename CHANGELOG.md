@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.15.3] - 2026-09-02
+
+### Changed
+- **Dynamic per-box lettering** — the typeset size is now computed per bubble (largest size that fits that box, capped at ~1/32 of page width) instead of a single uniform page-wide size. Short lines fill big bubbles; long dialogue shrinks to fit small ones.
+
 ## [0.15.2] - 2026-09-02
 
 ### Changed

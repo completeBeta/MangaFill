@@ -35,10 +35,9 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_w
 def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):
     """Largest font size (capped at `max_font`) whose wrapped lines fit the box.
 
-    Manga lettering is a bounded, consistent size — not "fill the bubble", which
-    produces absurd giant text for short lines in big bubbles. So the search is
-    clamped to `max_font`. Uses multiline_textbbox so the measurement matches what
-    PIL actually draws (a getmetrics() estimate drifted and caused overlap).
+    Uses multiline_textbbox so the measurement matches what PIL actually draws
+    (a getmetrics() estimate drifted and caused overlap). Returns None if even
+    the 8px floor overflows.
     """
     lo, hi = 8, max_font
     best = None
@@ -58,7 +57,7 @@ def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):
     return best
 
 
-def _draw_box(draw: ImageDraw.ImageDraw, bbox: tuple, text: str, font_path: str | None, size: int):
+def _draw_box(draw: ImageDraw.ImageDraw, bbox: tuple, text: str, font_path: str | None, max_font: int):
     if not text or not text.strip():
         return
     if not font_path:
@@ -67,26 +66,18 @@ def _draw_box(draw: ImageDraw.ImageDraw, bbox: tuple, text: str, font_path: str 
     pad = 4
     max_w = max(w - 2 * pad, 1)
     max_h = max(h - 2 * pad, 1)
-    # Render at the uniform page size; shrink ONLY if it overflows the box. This
-    # keeps lettering consistent across bubbles (a short line isn't blown up to
-    # fill a big bubble).
-    font = ImageFont.truetype(font_path, size)
-    lines = _wrap(draw, text, font, max_w)
-    joined = "\n".join(lines)
-    bb = draw.multiline_textbbox((0, 0), joined, font=font, spacing=2, align="center")
-    tw, th = bb[2] - bb[0], bb[3] - bb[1]
-    if tw > max_w or th > max_h:
-        fitted = _fit(text, max_w, max_h, font_path, max_font=size)
-        if fitted is None:
-            # Fallback: smallest size, wrap to width, allow overflow. A slightly
-            # overflowing line beats a silently blank bubble.
-            font = ImageFont.truetype(font_path, 8)
-            lines = _wrap(draw, text, font, max_w)
-        else:
-            _size, lines, font = fitted
+    # Dynamic per-box sizing: the largest size (capped at `max_font`) that fits
+    # the box. Short text fills a big bubble; long text shrinks to fit a small
+    # one. If nothing fits, fall back to 8px (may overflow) rather than blank.
+    fitted = _fit(text, max_w, max_h, font_path, max_font=max_font)
+    if fitted is None:
+        font = ImageFont.truetype(font_path, 8)
+        lines = _wrap(draw, text, font, max_w)
+    else:
+        _size, lines, font = fitted
     draw.multiline_text(
         (x + w // 2, y + h // 2),
-        joined if tw <= max_w and th <= max_h else "\n".join(lines),
+        "\n".join(lines),
         font=font,
         fill=(0, 0, 0),
         anchor="mm",
@@ -117,11 +108,10 @@ def typeset_page(
     out = image.copy()
     draw = ImageDraw.Draw(out)
     fp = font_path or resolve_font_path(font_id)
-    # Uniform manga lettering size across the page (~1/42 of page width; a 1125px
-    # page -> ~27px). A single consistent size beats per-bubble "largest that
-    # fits" — that produced a short line blown up to 32px in a big bubble while
-    # long dialogue shrank to ~18px. Shrink-to-fit only kicks in on overflow.
-    std_font = max(18, image.width // 42)
+    # Dynamic per-box lettering: each block is sized to its own box — the largest
+    # font (capped at ~1/32 of page width) that fits, so a short line fills a big
+    # bubble and long dialogue shrinks to fit a small one.
+    cap = max(20, image.width // 32)
     for b in blocks:
         if only is not None and id(b) not in only:
             continue
@@ -130,5 +120,5 @@ def typeset_page(
         if not b.translation:
             continue
         region = regions.get(id(b), b.bbox) if regions else b.bbox
-        _draw_box(draw, region, b.translation, fp, std_font)
+        _draw_box(draw, region, b.translation, fp, cap)
     return out
