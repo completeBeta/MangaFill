@@ -12,10 +12,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# libgomp1 for numpy OpenMP. (No libgl1 — the worker doesn't use OpenCV, and
-# libgl1 would drag in the whole Mesa/LLVM stack for nothing.)
+# libgomp1 for numpy OpenMP; libglib2.0-0 for opencv-python-headless (import cv2).
+# No libgl1 — opencv-headless and Pillow bundle their own GL-free libs, and
+# libgl1 would drag in the whole Mesa/LLVM stack for nothing.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgomp1 \
+        libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # deps first (cached separately from the code COPY)

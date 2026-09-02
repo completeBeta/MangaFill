@@ -8,3 +8,4 @@ pillow>=10.0
 numpy<2.0
 transformers>=4.49
 manga-ocr>=0.1.16
+opencv-python-headless>=4.8
