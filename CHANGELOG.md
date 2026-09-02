@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.12.2] - 2026-09-01
+
+### Fixed
+- **Default output mode now applies to uploads** — the Settings "Default output mode" (e.g. `mirror`) pre-selects the Upload form's output mode, so a saved default actually takes effect (still overridable per job).
+
 ## [0.12.1] - 2026-09-01
 
 ### Fixed

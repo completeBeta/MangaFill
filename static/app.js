@@ -279,6 +279,9 @@ $("#upload-form").addEventListener("submit", async (e) => {
 async function loadSettings() {
   const s = await api("/api/settings");
   $("#settings-mode").value = s.output_mode;
+  // Apply the saved default output mode to the upload form too (the user can
+  // still override it per job).
+  $("#upload-mode").value = s.output_mode;
   $("#settings-dry-run").checked = s.dry_run === "true";
 }
 
