@@ -12,10 +12,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# libgl1/libglib2.0-0 for Pillow/OpenCV native bits; libgomp1 for OpenMP.
+# libgomp1 for numpy OpenMP. (No libgl1 — the worker doesn't use OpenCV, and
+# libgl1 would drag in the whole Mesa/LLVM stack for nothing.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libgl1 \
-        libglib2.0-0 \
         libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
