@@ -11,6 +11,10 @@ Each translated block is typeset into its parent bubble (inset to its inscribed
 rectangle) or, for free text with no bubble, into its own box.
 
 If the detector is unavailable, it falls back to PP-OCRv5 + white-flood-fill.
+
+When `gpu_worker_url` is configured, detect+OCR and inpaint are offloaded to the
+GPU worker (see `remote.py`); any failure silently falls back to the local CPU
+models, so a down GPU never breaks a job.
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ from .ingest import load_image
 from .inpaint import inpaint_text
 from .ocr import ocr_crop
 from .pipeline import process_page
+from .remote import remote_detect_ocr, remote_inpaint
 from .translate import translate_page
 from .types import TextBlock
 from .typeset import typeset_page
@@ -51,6 +56,35 @@ def _iou(a: tuple, b: tuple) -> float:
     return inter / union if union else 0.0
 
 
+def _build_blocks_from_det(det: dict, image_np: np.ndarray) -> list[TextBlock]:
+    """OCR the detector's `text_bubble` + `text_free` regions into TextBlocks."""
+    blocks: list[TextBlock] = []
+    seen: list[tuple] = []
+    # 1) dialogue inside bubbles
+    for (x, y, w, h) in det["text_bubble"]:
+        if any(_iou((x, y, w, h), s) > 0.5 for s in seen):
+            continue  # detector double-fired the same region
+        text, conf = ocr_crop(image_np, (x, y, w, h))
+        if not text or len(text.strip()) <= 1:
+            continue
+        blocks.append(TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
+                                orientation="vertical"))
+        seen.append((x, y, w, h))
+    # 2) free text (narration boxes, mutters, SFX) — translate it too
+    for (x, y, w, h) in det["text_free"]:
+        if any(_iou((x, y, w, h), s) > 0.5 for s in seen):
+            continue  # dupe of a bubble or another free-text box
+        text, conf = ocr_crop(image_np, (x, y, w, h))
+        if not text or not _has_japanese(text):
+            continue  # watermark / page number
+        blocks.append(TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
+                                orientation="vertical"))
+        seen.append((x, y, w, h))
+    # reading order: top-to-bottom, then right-to-left within a row
+    blocks.sort(key=lambda b: (b.bbox[1], -b.bbox[0]))
+    return blocks
+
+
 def render_translated_page(
     image_path: str,
     model: str,
@@ -58,6 +92,7 @@ def render_translated_page(
     base_url: str = "https://openrouter.ai/api/v1",
     dry_run: bool = False,
     font_id: str | None = None,
+    gpu_worker_url: str = "",
 ) -> tuple[Image.Image, list[TextBlock], int, int]:
     """Run the full pipeline on one page.
 
@@ -67,45 +102,43 @@ def render_translated_page(
     `dry_run=True` runs detect + OCR but skips the LLM translation (no API call,
     no cost) — the page is returned unchanged with blocks carrying empty
     translations, so a dry-run job records what was *found* without spending.
+
+    `gpu_worker_url`, when set, offloads detect+OCR and inpaint to the remote
+    GPU worker; failures fall back to the local CPU models.
     """
     image = Image.fromarray(load_image(image_path))
     image_np = np.asarray(image)
 
-    # Prefer the trained detector for text + bubble regions.
-    det = None
-    try:
-        det = detect_containers(image)
-    except Exception:
+    # ---- detect + OCR (remote GPU worker → local detector → PP-OCRv5) --------
+    bubbles = None
+    blocks = None
+    if gpu_worker_url:
+        try:
+            remote = remote_detect_ocr(image, gpu_worker_url)
+            bubbles = remote["bubble"]
+            blocks = [
+                TextBlock(bbox=tuple(b["bbox"]), text=b["text"], confidence=None,
+                          orientation=b.get("orientation", "vertical"))
+                for b in remote["blocks"]
+            ]
+        except Exception:
+            bubbles = None
+            blocks = None
+
+    if blocks is None:
         det = None
+        try:
+            det = detect_containers(image)
+        except Exception:
+            det = None
+        if det is not None:
+            bubbles = det["bubble"]
+            blocks = _build_blocks_from_det(det, image_np)
+        else:
+            bubbles = None
+            blocks = process_page(image_path)
 
-    if det is not None:
-        blocks: list[TextBlock] = []
-        seen: list[tuple] = []
-        # 1) dialogue inside bubbles
-        for (x, y, w, h) in det["text_bubble"]:
-            if any(_iou((x, y, w, h), s) > 0.5 for s in seen):
-                continue  # detector double-fired the same region
-            text, conf = ocr_crop(image_np, (x, y, w, h))
-            if not text or len(text.strip()) <= 1:
-                continue
-            blocks.append(TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
-                                    orientation="vertical"))
-            seen.append((x, y, w, h))
-        # 2) free text (narration boxes, mutters, SFX) — translate it too
-        for (x, y, w, h) in det["text_free"]:
-            if any(_iou((x, y, w, h), s) > 0.5 for s in seen):
-                continue  # dupe of a bubble or another free-text box
-            text, conf = ocr_crop(image_np, (x, y, w, h))
-            if not text or not _has_japanese(text):
-                continue  # watermark / page number
-            blocks.append(TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
-                                    orientation="vertical"))
-            seen.append((x, y, w, h))
-        # reading order: top-to-bottom, then right-to-left within a row
-        blocks.sort(key=lambda b: (b.bbox[1], -b.bbox[0]))
-    else:
-        blocks = process_page(image_path)
-
+    # ---- translate (cloud LLM) ----------------------------------------------
     if dry_run:
         pt = ct = 0
         for b in blocks:
@@ -113,13 +146,14 @@ def render_translated_page(
     else:
         blocks, pt, ct = translate_page(blocks, model, api_key, base_url)
 
+    # ---- resolve typeset targets + erase boxes -------------------------------
     targets: list[tuple[TextBlock, tuple]] = []
     erase: list[tuple] = []
-    if det is not None:
+    if bubbles is not None:
         for b in blocks:
             if not b.translation:
                 continue
-            region = find_parent_bubble(det["bubble"], b.bbox)
+            region = find_parent_bubble(bubbles, b.bbox)
             if region is not None:
                 # Inset the bubble's bounding box to approximate its inscribed
                 # rectangle — ovals/spiked bubbles are narrower at the edges, so
@@ -145,7 +179,18 @@ def render_translated_page(
             targets.append((b, find_container(gray, b.bbox)))
             erase.append(b.bbox)
 
-    inpainted = inpaint_text(image, erase) if erase else image
+    # ---- inpaint (remote GPU worker → local LaMa) ----------------------------
+    if erase:
+        if gpu_worker_url:
+            try:
+                inpainted = remote_inpaint(image, erase, gpu_worker_url)
+            except Exception:
+                inpainted = inpaint_text(image, erase)
+        else:
+            inpainted = inpaint_text(image, erase)
+    else:
+        inpainted = image
+
     only = {id(b) for b, _region in targets}
     regions = {id(b): region for b, region in targets if region is not None}
     result = typeset_page(inpainted, blocks, font_id=font_id, regions=regions, only=only)

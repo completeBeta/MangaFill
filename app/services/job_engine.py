@@ -159,6 +159,7 @@ def process_job(job_id: int) -> None:
 
         m, dry_run = resolve_translation(db, job.model_id)
         font_id = get_setting(db, "font")
+        gpu_url = get_setting(db, "gpu_worker_url").strip()
         model = m.name if m else ""
         base_url = m.base_url if m else ""
         key = _resolve_key(m)
@@ -183,7 +184,8 @@ def process_job(job_id: int) -> None:
             db.commit()
             try:
                 img, blocks, pt, ct = render_translated_page(
-                    p.original_path, model, key, base_url, dry_run=dry_run, font_id=font_id
+                    p.original_path, model, key, base_url, dry_run=dry_run,
+                    font_id=font_id, gpu_worker_url=gpu_url,
                 )
                 out_path = _save_output(img, out_dir, p.original_path)
                 p.output_path = out_path

@@ -2,6 +2,12 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.16.0] - 2026-09-02
+
+### Added
+- **GPU worker** (`gpu-worker/`) — a standalone FastAPI service that runs the vision models (RT-DETR detect, manga-ocr, LaMa inpaint) on an NVIDIA GPU and exposes them over HTTP (`/detect-ocr`, `/inpaint`, `/health`). Ships its own Dockerfile (pinned to PyTorch 2.5.1 + CUDA 12.4 for Pascal support), docker-compose.yml, and a step-by-step Unraid README. Models are baked in at build time so first request is instant.
+- **Client-side GPU offload** — the pipeline now calls the worker for detect+OCR and inpaint when `gpu_worker_url` is set, and silently falls back to the local CPU models on any failure (a down GPU never breaks a job).
+
 ## [0.15.4] - 2026-09-02
 
 ### Fixed

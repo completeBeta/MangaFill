@@ -1,0 +1,16 @@
+# Reference compose for the GPU worker. On Unraid you can use this with the
+# "Compose" plugin, or add the container via the Docker UI (see README.md for
+# the UI steps — Extra Parameters + two env vars). The GPU is requested via the
+# `nvidia` runtime, not a normal port passthrough.
+services:
+  mangafill-gpu:
+    image: mangafill-gpu:latest
+    # build: .   # uncomment (and comment `image:`) to build from source
+    container_name: mangafill-gpu
+    ports:
+      - "9001:9001"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    runtime: nvidia
+    restart: unless-stopped
