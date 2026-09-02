@@ -8,6 +8,7 @@ __pycache__
 config
 data
 uploads
+hf-cache
 fonts/*.ttf
 fonts/*.otf
 tests
