@@ -2,8 +2,15 @@
 
 English manga lettering is horizontal (LTR), bold, and centered in the balloon.
 The hard part is fitting: pick the largest font size whose wrapped lines still
-fit the box, then center the block. DejaVu Bold is the v1 placeholder — a proper
-manga face (CC Wild Words / Anime Ace) should replace it once sourced.
+fit the box, then center the block.
+
+Font resolution (first hit wins):
+  1. ``$MANGA_FILL_FONT`` — explicit path override (e.g. a mounted licensed face).
+  2. Any ``.ttf``/``.otf`` dropped in ``fonts/`` (repo) or ``/app/fonts``
+     (container volume). The font files themselves are git-ignored — the
+     directory is a mount point for a licensed face (e.g. CC Wild Words /
+     Anime Ace), never redistributed.
+  3. DejaVu Sans Bold — the v1 placeholder / fallback.
 """
 from __future__ import annotations
 
@@ -13,14 +20,36 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .types import TextBlock
 
-FONT_CANDIDATES = (
+FONT_DIRS = ("fonts", "/app/fonts")
+FONT_FALLBACK = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 )
 
 
 def _find_font() -> str | None:
-    for p in FONT_CANDIDATES:
+    # 1. Explicit path override.
+    env = os.environ.get("MANGA_FILL_FONT")
+    if env and os.path.exists(env):
+        return env
+    # 2. Bundled / volume-mounted face in a fonts/ dir. Prefer a "roman"/"regular"
+    #    cut over italic/bold variants when several are present.
+    candidates: list[str] = []
+    for base in FONT_DIRS:
+        if os.path.isdir(base):
+            candidates.extend(
+                os.path.join(base, fn)
+                for fn in os.listdir(base)
+                if fn.lower().endswith((".ttf", ".otf"))
+            )
+    if candidates:
+        def _pref(p: str) -> tuple[int, str]:
+            n = os.path.basename(p).lower()
+            priority = 0 if ("roman" in n or "regular" in n or "wildword" in n) else 1
+            return priority, n
+        return sorted(candidates, key=_pref)[0]
+    # 3. DejaVu fallback.
+    for p in FONT_FALLBACK:
         if os.path.exists(p):
             return p
     return None

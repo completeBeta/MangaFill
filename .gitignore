@@ -9,6 +9,11 @@ uploads/
 *.db
 *.sqlite
 
+# Font files — licensed faces are volume-mounted (fonts/ or /app/fonts), never
+# committed/redistributed. The directory is kept alive by .gitkeep.
+fonts/*
+!fonts/.gitkeep
+
 # Python
 __pycache__/
 *.pyc

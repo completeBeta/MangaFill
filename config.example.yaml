@@ -19,6 +19,9 @@ pipeline:
     engine: lama            # lama | fill
     solid_threshold: 0.06   # std-dev below → cheap fill, above → LaMa
   typeset:
+    # Font is auto-detected: $MANGA_FILL_FONT override, then any .ttf/.otf in
+    # fonts/ (repo) or /app/fonts (container volume mount — e.g. a licensed
+    # Wild Words / Anime Ace face), then DejaVu Sans Bold as fallback.
     font: /app/fonts/comic.ttf
     min_font_pt: 10
     outline_width: 2

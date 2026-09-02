@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.13.0] - 2026-09-02
+
+### Added
+- **Drop-in manga font** — typesetting now resolves its lettering face automatically: `$MANGA_FILL_FONT` override, then any `.ttf`/`.otf` in `fonts/` (repo) or `/app/fonts` (container volume mount), then DejaVu Sans Bold as fallback. Font files are git-ignored so a licensed face (e.g. CC Wild Words / Anime Ace) can be mounted at runtime without redistributing it — replacing the old hard-coded DejaVu placeholder.
+
 ## [0.12.2] - 2026-09-01
 
 ### Fixed

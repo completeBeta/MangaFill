@@ -7,8 +7,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Native deps for OpenCV/Pillow + DejaVu fonts (typeset renders lettering with
-# DejaVuSans; the slim base image ships no fonts).
+# Native deps for OpenCV/Pillow + DejaVu fonts (lettering fallback when no font
+# is mounted at /app/fonts; the slim base image ships no fonts).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
