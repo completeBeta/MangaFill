@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.15.2] - 2026-09-02
+
+### Changed
+- **Larger lettering size** — the uniform typeset size increased from ~1/48 to ~1/42 of page width (a 1125px page now renders ~27px instead of ~23px), so dialogue reads larger and closer to a professional scanlation face. Shrink-to-fit on overflow is unchanged.
+
 ## [0.15.1] - 2026-09-02
 
 ### Fixed

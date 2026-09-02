@@ -117,11 +117,11 @@ def typeset_page(
     out = image.copy()
     draw = ImageDraw.Draw(out)
     fp = font_path or resolve_font_path(font_id)
-    # Uniform manga lettering size across the page (~1/48 of page width; a 1125px
-    # page -> ~23px). A single consistent size beats per-bubble "largest that
+    # Uniform manga lettering size across the page (~1/42 of page width; a 1125px
+    # page -> ~27px). A single consistent size beats per-bubble "largest that
     # fits" — that produced a short line blown up to 32px in a big bubble while
     # long dialogue shrank to ~18px. Shrink-to-fit only kicks in on overflow.
-    std_font = max(16, image.width // 48)
+    std_font = max(18, image.width // 42)
     for b in blocks:
         if only is not None and id(b) not in only:
             continue
