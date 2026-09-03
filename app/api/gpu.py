@@ -1,6 +1,5 @@
-"""GPU status endpoint — the vision GPU (detect/OCR/inpaint) lives on a separate
-host as a remote worker, wired later. This endpoint reports the current device
-plus whether a remote worker URL is configured and reachable.
+"""GPU status endpoint — reports the local vision-model device (CPU / local GPU)
+plus whether a remote GPU worker URL is configured and reachable.
 """
 from __future__ import annotations
 
@@ -10,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
+from app.pipeline.device import get_device, local_cuda_available
 from app.settings_store import get_setting
 
 router = APIRouter(prefix="/api/gpu", tags=["gpu"])
@@ -18,7 +18,6 @@ router = APIRouter(prefix="/api/gpu", tags=["gpu"])
 @router.get("")
 def gpu_status(db: Session = Depends(get_db)):
     url = get_setting(db, "gpu_worker_url").strip()
-    device = settings.device or "cpu"
     status = "not_configured"
     if url:
         try:
@@ -26,4 +25,10 @@ def gpu_status(db: Session = Depends(get_db)):
             status = "connected" if r.status_code == 200 else "unreachable"
         except Exception:
             status = "unreachable"
-    return {"device": device, "worker_url": url, "status": status}
+    return {
+        "device": settings.device,               # configured (auto | cpu | cuda)
+        "effective_device": get_device(),        # resolved local device (cpu | cuda)
+        "cuda_available": local_cuda_available(),
+        "worker_url": url,
+        "status": status,
+    }

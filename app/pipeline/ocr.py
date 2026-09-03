@@ -5,13 +5,19 @@ import numpy as np
 from PIL import Image
 from manga_ocr import MangaOcr
 
+from .device import get_device
+
 _mocr: MangaOcr | None = None
+_mocr_device: str | None = None
 
 
 def _get_mocr() -> MangaOcr:
-    global _mocr
-    if _mocr is None:
-        _mocr = MangaOcr()
+    global _mocr, _mocr_device
+    device = get_device()
+    if _mocr is None or _mocr_device != device:
+        # manga-ocr runs on CUDA unless forced to CPU (force_cpu=True).
+        _mocr = MangaOcr(force_cpu=(device == "cpu"))
+        _mocr_device = device
     return _mocr
 
 

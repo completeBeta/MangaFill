@@ -43,6 +43,33 @@ def test_dedup_keeps_distinct_boxes():
     assert sorted(kept) == sorted(boxes)
 
 
+def test_dedup_keep_smallest_drops_container_keeps_lines():
+    # Horizontal stat text: the detector returns a whole stat box (container) plus
+    # its individual lines. keep="smallest" keeps the lines, drops the container.
+    boxes = [
+        (0, 0, 400, 300),    # whole stat box
+        (10, 10, 200, 40),   # line 1
+        (10, 60, 200, 40),   # line 2
+        (10, 110, 150, 40),  # line 3
+    ]
+    kept = _dedup_boxes(boxes, seen=[], keep="smallest")
+    assert (0, 0, 400, 300) not in kept
+    assert (10, 10, 200, 40) in kept
+    assert (10, 60, 200, 40) in kept
+    assert (10, 110, 150, 40) in kept
+
+
+def test_device_resolve():
+    from app.pipeline import device as d
+
+    assert d.resolve("cpu") == "cpu"
+    # auto/cuda resolve to "cuda" only when a CUDA torch is present; otherwise
+    # they degrade to "cpu" — never an invalid value.
+    assert d.resolve("auto") in ("cpu", "cuda")
+    assert d.resolve("cuda") in ("cpu", "cuda")
+    assert d.resolve("") in ("cpu", "cuda")
+
+
 def test_is_blank_and_color():
     white = np.full((10, 10, 3), 255, dtype=np.uint8)
     assert _is_blank(white) is True

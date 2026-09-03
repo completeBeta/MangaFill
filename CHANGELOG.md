@@ -2,6 +2,12 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.17.0] - 2026-09-03
+
+### Added
+- **Horizontal text translation** — stat/character pages (character names, `筋力 B+` stat values, weapon lines) are now translated and re-lettered at their original position instead of being left in Japanese. Free text is split by orientation before de-duplication: vertical columns keep the full region (re-merge fragments), horizontal lines keep the individual line (drop the containing box), so a two-column stat table no longer collapses into overlapping text. Horizontal text is translated only on pages that also have vertical content — pure cover/credit pages (titles + credits only) stay as-is.
+- **Local GPU support** — the vision models (detect / OCR / inpaint) now respect a `device` setting (`auto` / `cpu` / `cuda`, default `auto`): when the host has CUDA the models run on the local GPU directly, with no external worker needed. The external `gpu_worker_url` worker remains available as a third mode. The GPU status badge in Settings now reports "Local GPU" / "External GPU" / "CPU" correctly.
+
 ## [0.16.3] - 2026-09-03
 
 ### Added

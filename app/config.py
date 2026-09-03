@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     dry_run: bool = True          # default ON — never change the default
     source_lang: str = "jp"
     target_lang: str = "en"
-    device: str = "cpu"
+    device: str = "auto"          # auto | cpu | cuda — local vision-model device
 
     # Default translation model (seeded on first boot; add/remove more from the
     # web UI Settings tab). Model-agnostic — any OpenAI-compatible endpoint.

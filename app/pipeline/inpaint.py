@@ -16,15 +16,21 @@ from __future__ import annotations
 from PIL import Image
 import numpy as np
 
+from .device import get_device
+
 _lama = None
+_lama_device = None
 
 
 def _get_lama():
-    global _lama
-    if _lama is None:
+    global _lama, _lama_device
+    device = get_device()
+    if _lama is None or _lama_device != device:
         from simple_lama_inpainting import SimpleLama  # lazy: downloads big-lama on first use
 
-        _lama = SimpleLama()
+        # SimpleLama's `device` accepts "cuda"/"cpu" (map_location + model.to both).
+        _lama = SimpleLama(device=device)
+        _lama_device = device
     return _lama
 
 

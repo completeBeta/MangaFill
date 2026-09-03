@@ -108,3 +108,31 @@ def test_translate_page_retries_missing_lines(monkeypatch):
     )
     assert out[0].translation == "Hello"
     assert out[1].translation == "World"  # dropped in batch, recovered on retry
+
+
+def test_translate_page_horizontal_only_when_requested(monkeypatch):
+    class _Fake:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "choices": [{"message": {"content": "1. Alpha\n2. Beta\n"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            }
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _Fake())
+    hv = translate.TextBlock(bbox=(0, 0, 10, 30), text="あ", orientation="vertical")
+    hh = translate.TextBlock(bbox=(0, 0, 40, 12), text="い", orientation="horizontal")
+
+    # Without the flag, horizontal text is left untranslated (cover/credit pages).
+    out, _pt, _ct = translate.translate_page([hv, hh], "m", "k", "https://x/v1")
+    assert out[0].translation == "Alpha"
+    assert out[1].translation == ""
+
+    # With the flag (stat/character pages), horizontal text is translated too.
+    out2, _pt2, _ct2 = translate.translate_page(
+        [hv, hh], "m", "k", "https://x/v1", translate_horizontal=True
+    )
+    assert out2[0].translation == "Alpha"
+    assert out2[1].translation == "Beta"

@@ -16,7 +16,9 @@ from fastapi.templating import Jinja2Templates
 
 from app import __version__
 from app.api import fonts as fonts_api, gpu as gpu_api, jobs, logs, models, pages, settings as settings_api
+from app.config import settings
 from app.db import init_db, SessionLocal
+from app.pipeline.device import set_device
 from app.services.logging import get_logger, setup_logging
 from app.settings_store import seed_default_model
 from app.worker import worker
@@ -25,6 +27,7 @@ from app.worker import worker
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    set_device(settings.device)  # resolve local CPU/GPU before any model loads
     init_db()
     db = SessionLocal()
     try:

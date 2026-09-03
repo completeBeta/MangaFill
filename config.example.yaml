@@ -11,7 +11,7 @@ pipeline:
   dry_run: true             # DEFAULT TRUE — detect+OCR+translate, but do NOT inpaint/typeset/write
   source_lang: jp
   target_lang: en
-  device: cpu               # cpu (Phase 1). Vision GPU wired later as a remote worker on the GPU host.
+  device: auto               # auto | cpu | cuda — local vision-model device (auto = CUDA if available)
   vertical_text: auto       # auto-detect vertical lines; typeset EN horizontally
   detect:
     engine: auto            # manga-text-segmentation | paddleocr | yolov8

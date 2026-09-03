@@ -132,11 +132,15 @@ def translate_page(
     model: str,
     api_key: str,
     base_url: str = "https://openrouter.ai/api/v1",
+    translate_horizontal: bool = False,
 ) -> tuple[list[TextBlock], int, int]:
-    """Translate the translatable blocks (vertical dialogue) of a page.
+    """Translate the translatable blocks of a page.
 
-    Furigana and horizontal text (titles/watermarks) are intentionally skipped.
-    Returns (blocks, prompt_tokens, completion_tokens).
+    Vertical dialogue is always translated. Horizontal text (stat lines, names,
+    titles) is translated only when ``translate_horizontal`` is set — the caller
+    sets it on pages that have vertical content (stat/character pages), and
+    leaves it off for pure-horizontal pages (covers/credits) whose text should
+    stay as-is. Furigana is never translated.
 
     LLM output is sanitized before it is written to a block: placeholder/refusal
     markers (e.g. a literal "[TEXT UNTRANSLATABLE]"), empty lines, and text that
@@ -145,7 +149,11 @@ def translate_page(
     empty `translation`, so the typesetter leaves the original Japanese intact
     rather than painting garbage onto the page.
     """
-    translatable = [b for b in blocks if b.orientation == "vertical" and b.text]
+    translatable = [
+        b for b in blocks
+        if b.text and (b.orientation == "vertical"
+                       or (translate_horizontal and b.orientation == "horizontal"))
+    ]
     if not translatable:
         return blocks, 0, 0
 

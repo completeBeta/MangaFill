@@ -5,10 +5,11 @@ Text and bubble detection are done by the trained ogkalu RT-DETR-v2 detector
 `text_bubble` (dialogue inside a bubble), and `text_free` (text outside any
 bubble: narration boxes, handwritten mutters, SFX) in one pass.
 
-Both `text_bubble` AND `text_free` are OCR'd + translated + re-lettered — the
-only `text_free` skipped is pure-ASCII watermarks / page numbers (no kana/kanji).
-Each translated block is typeset into its parent bubble (inset to its inscribed
-rectangle) or, for free text with no bubble, into its own box.
+Both `text_bubble` AND `text_free` are OCR'd. Vertical text (dialogue, vertical
+name/caption columns) is always translated and re-lettered into its bubble or
+box; horizontal text (stat lines, names, titles) is translated only on pages
+that also carry vertical content, and is re-lettered at its own position so the
+original layout is preserved. Pure-ASCII watermarks / page numbers are skipped.
 
 If the detector is unavailable, it falls back to PP-OCRv5 + white-flood-fill.
 
@@ -73,17 +74,26 @@ def _box_containment(a: tuple, b: tuple) -> float:
     return inter / smaller if smaller else 0.0
 
 
-def _dedup_boxes(boxes: list[tuple], seen: list[tuple]) -> list[tuple]:
-    """Drop nested/overlapping detections, keeping the largest (full) region.
+def _dedup_boxes(boxes: list[tuple], seen: list[tuple], keep: str = "largest") -> list[tuple]:
+    """Drop nested/overlapping detections.
 
     The ogkalu detector frequently returns the same text region at several
     granularities (a whole box plus its sub-lines). Processing all of them OCRs
     and typesets the same text repeatedly, which is the 'double-vision' on stat
-    pages. Iterating largest-first and rejecting anything mostly contained in an
-    already-kept box collapses those into one region.
+    pages. Which box survives depends on the orientation:
+
+      * ``keep="largest"`` — for *vertical* text, keep the full column (a name/
+        caption column split into fragments should re-merge to one block).
+      * ``keep="smallest"`` — for *horizontal* stat text, keep the individual
+        lines (a whole stat box is a container; its lines are the real text).
+
+    ``_box_containment`` is symmetric (fraction of the *smaller* box covered),
+    so the same rejection test works in both directions — only the iteration
+    order differs.
     """
     kept: list[tuple] = []
-    for box in sorted(boxes, key=lambda b: -(b[2] * b[3])):
+    ordered = sorted(boxes, key=lambda b: (b[2] * b[3]) if keep == "smallest" else -(b[2] * b[3]))
+    for box in ordered:
         if any(_iou(box, k) > 0.5 or _box_containment(box, k) > 0.85 for k in seen + kept):
             continue
         kept.append(box)
@@ -110,22 +120,33 @@ def _build_blocks_from_det(det: dict, image_np: np.ndarray) -> list[TextBlock]:
     """OCR the detector's `text_bubble` + `text_free` regions into TextBlocks."""
     blocks: list[TextBlock] = []
     seen: list[tuple] = []
-    # 1) dialogue inside bubbles — always vertical
-    for (x, y, w, h) in _dedup_boxes(det["text_bubble"], seen):
+    # 1) dialogue inside bubbles — always vertical, keep the full region
+    for (x, y, w, h) in _dedup_boxes(det["text_bubble"], seen, keep="largest"):
         text, conf = ocr_crop(image_np, (x, y, w, h))
         if not text or len(text.strip()) <= 1:
             continue
         blocks.append(TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
                                 orientation="vertical"))
         seen.append((x, y, w, h))
-    # 2) free text (narration boxes, mutters, SFX) — classify by shape so
-    #    horizontal stat lines / titles / credits are left untouched.
-    for (x, y, w, h) in _dedup_boxes(det["text_free"], seen):
+    # 2) free text — split by shape, dedup each group with the right strategy:
+    #    vertical columns keep the full region; horizontal stat lines keep the
+    #    individual lines (a whole stat box is a container, not a line).
+    free = det["text_free"]
+    free_vertical = [(x, y, w, h) for (x, y, w, h) in free if _orientation(w, h) != "horizontal"]
+    free_horizontal = [(x, y, w, h) for (x, y, w, h) in free if _orientation(w, h) == "horizontal"]
+    for (x, y, w, h) in _dedup_boxes(free_vertical, seen, keep="largest"):
         text, conf = ocr_crop(image_np, (x, y, w, h))
         if not text or not _has_japanese(text):
             continue  # watermark / page number
         blocks.append(TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
                                 orientation=_orientation(w, h)))
+        seen.append((x, y, w, h))
+    for (x, y, w, h) in _dedup_boxes(free_horizontal, seen, keep="smallest"):
+        text, conf = ocr_crop(image_np, (x, y, w, h))
+        if not text or not _has_japanese(text):
+            continue  # watermark / page number
+        blocks.append(TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
+                                orientation="horizontal"))
         seen.append((x, y, w, h))
     # reading order: top-to-bottom, then right-to-left within a row
     blocks.sort(key=lambda b: (b.bbox[1], -b.bbox[0]))
@@ -228,7 +249,13 @@ def render_translated_page(
             b.translation = ""
     else:
         emit("translate")
-        blocks, pt, ct = translate_page(blocks, model, api_key, base_url)
+        # Translate horizontal stat text only on pages that also carry vertical
+        # content (stat/character pages) — a pure-horizontal page (cover/credit
+        # page with only titles + credits) is left as-is.
+        has_vertical = any(b.orientation == "vertical" for b in blocks)
+        blocks, pt, ct = translate_page(
+            blocks, model, api_key, base_url, translate_horizontal=has_vertical
+        )
 
     # ---- resolve typeset targets + erase boxes -------------------------------
     targets: list[tuple[TextBlock, tuple]] = []
@@ -237,17 +264,23 @@ def render_translated_page(
         for b in blocks:
             if not b.translation:
                 continue
-            region = find_parent_bubble(bubbles, b.bbox)
-            if region is not None:
-                # Inset the bubble's bounding box to approximate its inscribed
-                # rectangle — ovals/spiked bubbles are narrower at the edges, so
-                # fitting text to the full bbox spills over the outline.
-                x, y, w, h = region
-                ix, iy = int(w * 0.15), int(h * 0.12)
-                region = (x + ix, y + iy, w - 2 * ix, h - 2 * iy)
-            else:
-                # Free text / caption: no bubble edge to avoid — use its own box.
+            if b.orientation == "horizontal":
+                # Horizontal stat line / name: typeset at its own box to preserve
+                # the original layout (do NOT center into a shared parent bubble —
+                # that's what stacked the two-column stat tables on top of each other).
                 region = b.bbox
+            else:
+                region = find_parent_bubble(bubbles, b.bbox)
+                if region is not None:
+                    # Inset the bubble's bounding box to approximate its inscribed
+                    # rectangle — ovals/spiked bubbles are narrower at the edges, so
+                    # fitting text to the full bbox spills over the outline.
+                    x, y, w, h = region
+                    ix, iy = int(w * 0.15), int(h * 0.12)
+                    region = (x + ix, y + iy, w - 2 * ix, h - 2 * iy)
+                else:
+                    # Free text / caption: no bubble edge to avoid — use its own box.
+                    region = b.bbox
             targets.append((b, region))
             erase.append(b.bbox)
     else:

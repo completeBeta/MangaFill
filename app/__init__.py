@@ -1,3 +1,3 @@
 """Manga Fill — translate raw Japanese manga to English."""
 
-__version__ = "0.16.3"
+__version__ = "0.17.0"

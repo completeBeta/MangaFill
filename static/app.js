@@ -398,8 +398,19 @@ async function loadGpu() {
   const g = await api("/api/gpu");
   $("#gpu-worker-url").value = g.worker_url || "";
   const badge = $("#gpu-status-badge");
-  badge.textContent = g.device === "gpu" ? "GPU" : (g.worker_url ? g.status : "CPU only");
-  badge.className = "badge " + (g.status === "connected" ? "done" : g.status === "unreachable" ? "failed" : "muted");
+  let label, cls;
+  if (g.worker_url) {
+    label = g.status === "connected" ? "External GPU" : "External GPU (down)";
+    cls = g.status === "connected" ? "done" : "failed";
+  } else if (g.effective_device === "cuda") {
+    label = "Local GPU";
+    cls = "done";
+  } else {
+    label = g.cuda_available ? "CPU (set device=cuda)" : "CPU only";
+    cls = "muted";
+  }
+  badge.textContent = label;
+  badge.className = "badge " + cls;
 }
 
 async function saveGpu() {

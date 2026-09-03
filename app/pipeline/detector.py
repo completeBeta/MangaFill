@@ -16,19 +16,24 @@ from __future__ import annotations
 
 from PIL import Image
 
+from .device import get_device
+
 MODEL_ID = "ogkalu/comic-text-and-bubble-detector"
 
 _model = None
 _processor = None
+_model_device = None
 
 
 def _get():
-    global _model, _processor
-    if _model is None:
+    global _model, _processor, _model_device
+    device = get_device()
+    if _model is None or _model_device != device:
         from transformers import RTDetrV2ForObjectDetection, RTDetrImageProcessor
 
         _processor = RTDetrImageProcessor.from_pretrained(MODEL_ID)
-        _model = RTDetrV2ForObjectDetection.from_pretrained(MODEL_ID)
+        _model = RTDetrV2ForObjectDetection.from_pretrained(MODEL_ID).to(device)
+        _model_device = device
     return _model, _processor
 
 
@@ -50,6 +55,8 @@ def detect_containers(image: Image.Image, threshold: float = 0.2) -> dict:
     model, processor = _get()
     w, h = image.size
     inputs = processor(images=image, return_tensors="pt")
+    if get_device() == "cuda":
+        inputs = {k: v.to("cuda") for k, v in inputs.items()}
     outputs = model(**inputs)
     res = processor.post_process_object_detection(
         outputs, target_sizes=[(h, w)], threshold=threshold
