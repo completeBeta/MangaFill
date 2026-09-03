@@ -56,33 +56,98 @@ def _iou(a: tuple, b: tuple) -> float:
     return inter / union if union else 0.0
 
 
+def _box_containment(a: tuple, b: tuple) -> float:
+    """Fraction of the *smaller* box's area covered by the intersection.
+
+    A nested detection (the detector emits the same text column at several
+    granularities) has near-1.0 containment but low IoU, so IoU alone misses it.
+    """
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    x0, y0 = max(ax, bx), max(ay, by)
+    x1, y1 = min(ax + aw, bx + bw), min(ay + ah, by + bh)
+    if x1 <= x0 or y1 <= y0:
+        return 0.0
+    inter = (x1 - x0) * (y1 - y0)
+    smaller = min(aw * ah, bw * bh)
+    return inter / smaller if smaller else 0.0
+
+
+def _dedup_boxes(boxes: list[tuple], seen: list[tuple]) -> list[tuple]:
+    """Drop nested/overlapping detections, keeping the largest (full) region.
+
+    The ogkalu detector frequently returns the same text region at several
+    granularities (a whole box plus its sub-lines). Processing all of them OCRs
+    and typesets the same text repeatedly, which is the 'double-vision' on stat
+    pages. Iterating largest-first and rejecting anything mostly contained in an
+    already-kept box collapses those into one region.
+    """
+    kept: list[tuple] = []
+    for box in sorted(boxes, key=lambda b: -(b[2] * b[3])):
+        if any(_iou(box, k) > 0.5 or _box_containment(box, k) > 0.85 for k in seen + kept):
+            continue
+        kept.append(box)
+    return kept
+
+
+def _orientation(w: int, h: int) -> str:
+    """Classify a free-text region's orientation from its box shape.
+
+    Tall-narrow is a vertical name/caption column (translated); wide is a
+    horizontal stat line / title / credit (left untouched). Speech-bubble text
+    is handled separately and always forced vertical — its boxes span several
+    vertical columns, giving a near-square aspect that this shape test would
+    mis-read as horizontal.
+    """
+    if w <= 16 and h > w * 2:
+        return "furigana"
+    if h > w * 1.5:
+        return "vertical"
+    return "horizontal"
+
+
 def _build_blocks_from_det(det: dict, image_np: np.ndarray) -> list[TextBlock]:
     """OCR the detector's `text_bubble` + `text_free` regions into TextBlocks."""
     blocks: list[TextBlock] = []
     seen: list[tuple] = []
-    # 1) dialogue inside bubbles
-    for (x, y, w, h) in det["text_bubble"]:
-        if any(_iou((x, y, w, h), s) > 0.5 for s in seen):
-            continue  # detector double-fired the same region
+    # 1) dialogue inside bubbles — always vertical
+    for (x, y, w, h) in _dedup_boxes(det["text_bubble"], seen):
         text, conf = ocr_crop(image_np, (x, y, w, h))
         if not text or len(text.strip()) <= 1:
             continue
         blocks.append(TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
                                 orientation="vertical"))
         seen.append((x, y, w, h))
-    # 2) free text (narration boxes, mutters, SFX) — translate it too
-    for (x, y, w, h) in det["text_free"]:
-        if any(_iou((x, y, w, h), s) > 0.5 for s in seen):
-            continue  # dupe of a bubble or another free-text box
+    # 2) free text (narration boxes, mutters, SFX) — classify by shape so
+    #    horizontal stat lines / titles / credits are left untouched.
+    for (x, y, w, h) in _dedup_boxes(det["text_free"], seen):
         text, conf = ocr_crop(image_np, (x, y, w, h))
         if not text or not _has_japanese(text):
             continue  # watermark / page number
         blocks.append(TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
-                                orientation="vertical"))
+                                orientation=_orientation(w, h)))
         seen.append((x, y, w, h))
     # reading order: top-to-bottom, then right-to-left within a row
     blocks.sort(key=lambda b: (b.bbox[1], -b.bbox[0]))
     return blocks
+
+
+def _is_blank(image_np: np.ndarray) -> bool:
+    """True if the page is essentially empty (a blank/divider page)."""
+    gray = image_np.astype(float).mean(axis=2) if image_np.ndim == 3 else image_np
+    return float(gray.mean()) > 250.0
+
+
+def _is_color(image: Image.Image) -> bool:
+    """True if the page has real colour (a colour splash/cover, not B/W manga).
+
+    The translate → inpaint → typeset pipeline is built for B/W manga; running it
+    on a colour cover mangles the artwork. Chroma = max(R,G,B) - min(R,G,B) per
+    pixel; a real colour page averages well above ~10 while B/W manga stays < 3.
+    """
+    a = np.asarray(image.convert("RGB")).astype(float)
+    chroma = a.max(axis=2) - a.min(axis=2)
+    return float(chroma.mean()) > 10.0
 
 
 def render_translated_page(
@@ -108,6 +173,12 @@ def render_translated_page(
     """
     image = Image.fromarray(load_image(image_path))
     image_np = np.asarray(image)
+
+    # Blank and colour pages (dividers, covers, colour splashes) are left
+    # byte-for-byte unchanged — there's no dialogue to translate, and running
+    # the B/W pipeline on them erases logo art or produces blank output.
+    if _is_blank(image_np) or _is_color(image):
+        return image, [], 0, 0
 
     # ---- detect + OCR (remote GPU worker → local detector → PP-OCRv5) --------
     bubbles = None

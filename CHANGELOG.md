@@ -2,6 +2,12 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.16.2] - 2026-09-03
+
+### Fixed
+- **Stat tables / title pages no longer render as overlapping "double-vision" text** — the ogkalu detector path (`render.py`) was forcing every detected region to `vertical` and OCR'ing nested duplicate boxes (a whole box plus its sub-lines) multiple times. Free text is now classified by shape (tall-narrow = vertical dialogue/name columns → translated; wide = horizontal stat lines / titles / credits → left as-is), and nested/overlapping detections are collapsed to the largest region before OCR.
+- **Blank and colour pages are left untouched** — dividers/blank pages and colour splash/cover pages (which the B/W pipeline would otherwise erase or mangle) are now detected and copied through byte-for-byte instead of being run through inpaint/typeset.
+
 ## [0.16.1] - 2026-09-03
 
 ### Fixed
