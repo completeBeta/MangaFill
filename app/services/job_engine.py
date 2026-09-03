@@ -169,6 +169,14 @@ def process_job(job_id: int) -> None:
 
         pages = db.query(Page).filter(Page.job_id == job_id).order_by(Page.index).all()
         stopped = False
+
+        def _progress(stage: str) -> None:
+            # Live stage for the dashboard's granular progress bar. Committing on
+            # every stage change is a handful of writes per page — cheap under WAL.
+            job.stage = stage
+            job.updated_at = _now()
+            db.commit()
+
         for p in pages:
             # Respect stop/pause set from the API mid-run (fresh read from DB).
             try:
@@ -181,11 +189,13 @@ def process_job(job_id: int) -> None:
             if p.status == "done":
                 continue  # resume: skip pages already translated
             p.status = "running"
+            job.stage = "detect"
             db.commit()
             try:
                 img, blocks, pt, ct = render_translated_page(
                     p.original_path, model, key, base_url, dry_run=dry_run,
                     font_id=font_id, gpu_worker_url=gpu_url,
+                    progress_cb=_progress,
                 )
                 out_path = _save_output(img, out_dir, p.original_path)
                 p.output_path = out_path
@@ -217,6 +227,7 @@ def process_job(job_id: int) -> None:
             db.commit()
 
         if stopped:
+            job.stage = ""
             db.commit()
             log.info("job %s stopped early (status=%s)", job_id, job.status)
             return
@@ -225,6 +236,7 @@ def process_job(job_id: int) -> None:
         done = db.query(Page).filter(Page.job_id == job_id, Page.status == "done").count()
         total = job.pages_total
         job.status = "done" if done == total else ("partial" if done > 0 else "failed")
+        job.stage = ""
         job.finished_at = _now()
         if done > 0:
             job.error = _assemble(job_id, job.output_mode, job.source_format) or None

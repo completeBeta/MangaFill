@@ -34,6 +34,7 @@ def _job_dict(job: Job, with_pages: bool = False) -> dict:
         "output_mode": job.output_mode,
         "model_id": job.model_id,
         "status": job.status,
+        "stage": job.stage,
         "pages_total": job.pages_total,
         "pages_done": job.pages_done,
         "blocks_found": job.blocks_found,

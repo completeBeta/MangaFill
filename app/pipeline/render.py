@@ -158,6 +158,7 @@ def render_translated_page(
     dry_run: bool = False,
     font_id: str | None = None,
     gpu_worker_url: str = "",
+    progress_cb=None,
 ) -> tuple[Image.Image, list[TextBlock], int, int]:
     """Run the full pipeline on one page.
 
@@ -170,7 +171,14 @@ def render_translated_page(
 
     `gpu_worker_url`, when set, offloads detect+OCR and inpaint to the remote
     GPU worker; failures fall back to the local CPU models.
+
+    `progress_cb(stage)`, when provided, is called with one of ``detect``,
+    ``ocr``, ``translate``, ``inpaint``, ``typeset`` as the page advances through
+    the pipeline — the worker uses it to drive a finer-grained progress bar than
+    whole-page granularity.
     """
+    emit = progress_cb or (lambda _stage: None)
+
     image = Image.fromarray(load_image(image_path))
     image_np = np.asarray(image)
 
@@ -185,6 +193,7 @@ def render_translated_page(
     blocks = None
     if gpu_worker_url:
         try:
+            emit("detect")
             remote = remote_detect_ocr(image, gpu_worker_url)
             bubbles = remote["bubble"]
             blocks = [
@@ -199,14 +208,17 @@ def render_translated_page(
     if blocks is None:
         det = None
         try:
+            emit("detect")
             det = detect_containers(image)
         except Exception:
             det = None
         if det is not None:
             bubbles = det["bubble"]
+            emit("ocr")
             blocks = _build_blocks_from_det(det, image_np)
         else:
             bubbles = None
+            emit("ocr")
             blocks = process_page(image_path)
 
     # ---- translate (cloud LLM) ----------------------------------------------
@@ -215,6 +227,7 @@ def render_translated_page(
         for b in blocks:
             b.translation = ""
     else:
+        emit("translate")
         blocks, pt, ct = translate_page(blocks, model, api_key, base_url)
 
     # ---- resolve typeset targets + erase boxes -------------------------------
@@ -252,6 +265,7 @@ def render_translated_page(
 
     # ---- inpaint (remote GPU worker → local LaMa) ----------------------------
     if erase:
+        emit("inpaint")
         if gpu_worker_url:
             try:
                 inpainted = remote_inpaint(image, erase, gpu_worker_url)
@@ -264,5 +278,6 @@ def render_translated_page(
 
     only = {id(b) for b, _region in targets}
     regions = {id(b): region for b, region in targets if region is not None}
+    emit("typeset")
     result = typeset_page(inpainted, blocks, font_id=font_id, regions=regions, only=only)
     return result, blocks, pt, ct

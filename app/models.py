@@ -23,6 +23,7 @@ class Job(Base):
     source_format: Mapped[str] = mapped_column(String, default="folder")  # input: folder | cbz | zip
     model_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # -> models.id (soft ref)
     status: Mapped[str] = mapped_column(String, default="queued")  # queued|running|done|partial|failed|cancelled
+    stage: Mapped[str] = mapped_column(String, default="")  # current pipeline stage (detect|ocr|translate|inpaint|typeset)
     pages_total: Mapped[int] = mapped_column(Integer, default=0)
     pages_done: Mapped[int] = mapped_column(Integer, default=0)
     blocks_found: Mapped[int] = mapped_column(Integer, default=0)

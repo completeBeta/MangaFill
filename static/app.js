@@ -203,6 +203,10 @@ $("#model-editor").addEventListener("click", async (e) => {
 
 // ---------- jobs ----------
 const BADGE = { queued: "queued", running: "running", done: "done", partial: "partial", failed: "failed", paused: "paused", cancelled: "cancelled" };
+// Fractional progress of each pipeline stage within the current page, so the bar
+// advances smoothly during a single page instead of jumping page-by-page.
+const STAGE_POS = { detect: 0.05, ocr: 0.3, translate: 0.8, inpaint: 0.95, typeset: 1.0 };
+const STAGE_LABEL = { detect: "Detecting", ocr: "Reading text", translate: "Translating", inpaint: "Cleaning", typeset: "Typesetting" };
 
 function renderJobs(jobs) {
   const el = $("#jobs-list");
@@ -211,8 +215,18 @@ function renderJobs(jobs) {
     return;
   }
   el.innerHTML = jobs.map((j) => {
-    const pct = j.pages_total ? Math.round((100 * j.pages_done) / j.pages_total) : 0;
+    const terminal = ["done", "partial", "failed", "cancelled"].includes(j.status);
+    let pct;
+    if (terminal) {
+      pct = j.pages_total ? Math.round((100 * j.pages_done) / j.pages_total) : 0;
+    } else {
+      const stagePos = STAGE_POS[j.stage] || 0;
+      pct = j.pages_total ? Math.round((100 * (j.pages_done + stagePos)) / j.pages_total) : 0;
+    }
     const modelName = modelMap[j.model_id] ? modelMap[j.model_id].name : "default";
+    const pageLabel = (j.status === "running" && j.stage)
+      ? `<span class="stage">${STAGE_LABEL[j.stage] || esc(j.stage)} · page ${j.pages_done + 1}/${j.pages_total}</span>`
+      : `<span>${j.pages_done}/${j.pages_total} pages</span>`;
     return `
       <div class="job ${j.error ? "error-box" : ""}">
         <div class="job-head">
@@ -223,7 +237,7 @@ function renderJobs(jobs) {
         </div>
         <div class="progress"><span style="width:${pct}%"></span></div>
         <div class="job-meta">
-          <span>${j.pages_done}/${j.pages_total} pages</span>
+          ${pageLabel}
           <span>${j.blocks_found} blocks &middot; ${j.blocks_ok} translated</span>
           <span>${j.tokens_used} tok</span>
           <span>$${(j.cost_usd || 0).toFixed(6)}</span>

@@ -2,6 +2,14 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.16.3] - 2026-09-03
+
+### Added
+- **Granular, stage-level progress** — the dashboard progress bar now advances through each page's pipeline stages (`Detecting → Reading text → Translating → Cleaning → Typesetting`) instead of jumping a whole page at a time, and shows the live stage + page number while a job runs. The worker records the current `stage` on the job row as the page progresses.
+
+### Fixed
+- **Silently-dropped translation lines are now retried** — a batched translation request occasionally drops a line (truncation near `max_tokens`, or numbering drift), which left that bubble untranslated with no error. Any line that comes back empty despite having source text is retried individually before the page is considered done.
+
 ## [0.16.2] - 2026-09-03
 
 ### Fixed

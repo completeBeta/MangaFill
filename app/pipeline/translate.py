@@ -154,4 +154,19 @@ def translate_page(
     )
     for b, en in zip(translatable, translations):
         b.translation = _clean_translation(en)
+
+    # Retry any line that came back empty despite having source text. A batched
+    # request occasionally drops a line (truncation near max_tokens, or numbering
+    # drift), which would otherwise silently leave that bubble untranslated.
+    for b in translatable:
+        if b.translation or not b.text:
+            continue
+        try:
+            (en,), p2, c2 = translate_lines([b.text], model, api_key, base_url)
+            b.translation = _clean_translation(en)
+            pt += p2
+            ct += c2
+        except Exception:
+            pass  # leave untranslated (original kept) rather than crash the page
+
     return blocks, pt, ct

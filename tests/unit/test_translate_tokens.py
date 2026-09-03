@@ -80,3 +80,31 @@ def test_translate_page_sanitizes_garbage(monkeypatch):
     assert out[0].translation == ""   # placeholder dropped
     assert out[1].translation == ""   # Japanese echo dropped
     assert out[2].translation == "Welcome!"
+
+
+def test_translate_page_retries_missing_lines(monkeypatch):
+    def fake_post(*a, **k):
+        user = k["json"]["messages"][1]["content"]
+        n_lines = sum(1 for l in user.split("\n") if l.strip()[:1].isdigit())
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                content = "1. Hello" if n_lines > 1 else "1. World"
+                return {
+                    "choices": [{"message": {"content": content}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                }
+
+        return R()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    b1 = translate.TextBlock(bbox=(0, 0, 10, 30), text="あ", orientation="vertical")
+    b2 = translate.TextBlock(bbox=(0, 0, 10, 30), text="い", orientation="vertical")
+    out, _pt, _ct = translate.translate_page(
+        [b1, b2], "m", "k", "https://example.test/v1"
+    )
+    assert out[0].translation == "Hello"
+    assert out[1].translation == "World"  # dropped in batch, recovered on retry

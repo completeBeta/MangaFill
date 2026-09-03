@@ -59,6 +59,8 @@ def init_db() -> None:
             conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN model_id INTEGER")
         if "source_format" not in cols:
             conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN source_format VARCHAR DEFAULT 'folder'")
+        if "stage" not in cols:
+            conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN stage VARCHAR DEFAULT ''")
 
         mcols = [r[1] for r in conn.exec_driver_sql("PRAGMA table_info(models)")]
         for col, ddl in [
