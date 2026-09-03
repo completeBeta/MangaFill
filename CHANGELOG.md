@@ -2,6 +2,12 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.16.1] - 2026-09-03
+
+### Fixed
+- **Garbage LLM output is no longer typeset** — the translator now drops placeholder/refusal markers (e.g. a literal `[TEXT UNTRANSLATABLE]`), empty lines, and text that is still Japanese (the model echoing the source back instead of translating). The affected block keeps an empty translation, so the typesetter leaves the original Japanese intact instead of painting garbage onto the page.
+- **Text is now readable over dark boxes** — typeset lettering draws a white outline behind the glyphs (sized to the font), so black dialogue stays legible over dark screentone/stat panels instead of vanishing.
+
 ## [0.16.0] - 2026-09-02
 
 ### Added

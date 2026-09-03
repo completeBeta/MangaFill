@@ -33,6 +33,51 @@ def _parse_numbered(content: str, n: int) -> list[str]:
     return [found.get(i + 1, "") for i in range(n)]
 
 
+_CJK_RANGES = (
+    ("\u3040", "\u30ff"),  # hiragana + katakana
+    ("\u4e00", "\u9fff"),  # kanji
+    ("\u3000", "\u303f"),  # CJK punctuation (。「」…)
+)
+
+# Markers small translation models emit when they can't handle a line instead of
+# (or in addition to) returning English. Case-insensitive substring match.
+_PLACEHOLDER_MARKERS = (
+    "[text untranslatable]",
+    "[untranslatable]",
+    "[untranslated]",
+    "untranslatable",
+    "[no translation]",
+    "[unable to translate]",
+    "[cannot be translated]",
+)
+
+
+def _has_cjk(text: str) -> bool:
+    """True if `text` contains any kana/kanji/CJK punctuation."""
+    return any(lo <= ch <= hi for lo, hi in _CJK_RANGES for ch in text)
+
+
+def _clean_translation(raw: str) -> str:
+    """Return a usable English translation, or "" if the line should be skipped.
+
+    Rejects placeholder/refusal markers and text that is still Japanese (the
+    model echoing the source back). Strips stray CJK so a translation that is
+    mostly English but carries a leaked kanji/kana isn't dropped wholesale —
+    only a line with no usable Latin content is treated as untranslated.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    low = s.lower()
+    if any(m in low for m in _PLACEHOLDER_MARKERS):
+        return ""
+    latin = "".join(ch for ch in s if not _has_cjk(ch))
+    latin = latin.strip()
+    if not latin:
+        return ""  # entirely Japanese — the model echoed instead of translating
+    return latin
+
+
 def translate_lines(
     lines: list[str],
     model: str,
@@ -92,6 +137,13 @@ def translate_page(
 
     Furigana and horizontal text (titles/watermarks) are intentionally skipped.
     Returns (blocks, prompt_tokens, completion_tokens).
+
+    LLM output is sanitized before it is written to a block: placeholder/refusal
+    markers (e.g. a literal "[TEXT UNTRANSLATABLE]"), empty lines, and text that
+    still contains kana/kanji (the model echoing the source back instead of
+    translating) are all treated as "no translation". The block then keeps an
+    empty `translation`, so the typesetter leaves the original Japanese intact
+    rather than painting garbage onto the page.
     """
     translatable = [b for b in blocks if b.orientation == "vertical" and b.text]
     if not translatable:
@@ -101,5 +153,5 @@ def translate_page(
         [b.text for b in translatable], model, api_key, base_url
     )
     for b, en in zip(translatable, translations):
-        b.translation = en
+        b.translation = _clean_translation(en)
     return blocks, pt, ct

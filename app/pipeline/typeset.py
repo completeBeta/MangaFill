@@ -83,6 +83,11 @@ def _draw_box(draw: ImageDraw.ImageDraw, bbox: tuple, text: str, font_path: str 
         anchor="mm",
         align="center",
         spacing=2,
+        # White outline behind the glyphs so black lettering stays readable over
+        # dark boxes/screentone (stat tables, narration panels). The stroke is
+        # sized to the font so it scales cleanly from 8px to the 32px cap.
+        stroke_width=max(1, font.size // 8),
+        stroke_fill=(255, 255, 255),
     )
 
 
