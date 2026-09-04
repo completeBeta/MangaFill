@@ -2,6 +2,15 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.19.2] - 2026-09-04
+
+### Fixed
+- **Text layered on top of itself on title/stat pages** — the GPU worker returned the same text region at several granularities (a whole stat column plus its individual lines, the same credit line twice) and marked every block "vertical", so the typesetter re-lettered English on top of English. The worker now classifies orientation by box shape and dedups nested/overlapping detections (vertical keeps the full region, horizontal keeps individual lines); the app additionally dedups overlapping blocks as a safety net.
+- **Text spilling over its box (padding)** — the typesetter measured the glyph box without the white-outline stroke, so lettering + outline overflowed the bubble/box. Measurement now includes the stroke (`textbbox`/`multiline_textbbox` with `stroke_width`), and box padding was increased.
+
+### Changed
+- GPU worker `/detect-ocr` orientation classification + nested-box dedup (worker 0.2.2).
+
 ## [0.19.1] - 2026-09-04
 
 ### Fixed

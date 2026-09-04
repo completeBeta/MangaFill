@@ -16,13 +16,20 @@ from .fonts import resolve_font_path
 from .types import TextBlock
 
 
-def _wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_w: int) -> list[str]:
+def _text_w(draw: ImageDraw.ImageDraw, text: str, font) -> int:
+    """Text width including the white-outline stroke (stroke extends outward)."""
+    sw = max(1, font.size // 8)
+    bb = draw.textbbox((0, 0), text, font=font, stroke_width=sw)
+    return int(bb[2] - bb[0])
+
+
+def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int) -> list[str]:
     words = text.split()
     lines: list[str] = []
     cur = ""
     for w in words:
         trial = (cur + " " + w).strip()
-        if not cur or draw.textlength(trial, font=font) <= max_w:
+        if not cur or _text_w(draw, trial, font) <= max_w:
             cur = trial
         else:
             lines.append(cur)
@@ -36,8 +43,10 @@ def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):
     """Largest font size (capped at `max_font`) whose wrapped lines fit the box.
 
     Uses multiline_textbbox so the measurement matches what PIL actually draws
-    (a getmetrics() estimate drifted and caused overlap). Returns None if even
-    the 8px floor overflows.
+    (a getmetrics() estimate drifted and caused overlap), measuring *with* the
+    white-outline stroke so the lettering + stroke stays inside the box (the
+    "text spilling over its box" bug). Returns None if even the 8px floor
+    overflows.
     """
     lo, hi = 8, max_font
     best = None
@@ -45,9 +54,12 @@ def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):
     while lo <= hi:
         mid = (lo + hi) // 2
         font = ImageFont.truetype(font_path, mid)
+        sw = max(1, mid // 8)
         lines = _wrap(probe, text, font, max_w)
         joined = "\n".join(lines)
-        bb = probe.multiline_textbbox((0, 0), joined, font=font, spacing=2, align="center")
+        bb = probe.multiline_textbbox(
+            (0, 0), joined, font=font, spacing=2, align="center", stroke_width=sw
+        )
         tw, th = bb[2] - bb[0], bb[3] - bb[1]
         if tw <= max_w and th <= max_h:
             best = (mid, lines, font)
@@ -63,7 +75,7 @@ def _draw_box(draw: ImageDraw.ImageDraw, bbox: tuple, text: str, font_path: str 
     if not font_path:
         return
     x, y, w, h = bbox
-    pad = 4
+    pad = 6
     max_w = max(w - 2 * pad, 1)
     max_h = max(h - 2 * pad, 1)
     # Dynamic per-box sizing: the largest size (capped at `max_font`) that fits

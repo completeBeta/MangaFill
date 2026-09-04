@@ -4,6 +4,7 @@ from PIL import Image
 
 from app.pipeline.render import (
     _box_containment,
+    _dedup_blocks,
     _dedup_boxes,
     _drop_non_japanese,
     _iou,
@@ -99,3 +100,17 @@ def test_drop_non_japanese_filters_english():
     assert mixed in kept    # has kana -> translate
     assert en not in kept   # already-English -> leave untouched
     assert empty not in kept
+
+
+def test_dedup_blocks_drops_nested_duplicates():
+    from app.pipeline.types import TextBlock
+
+    # The same region detected whole + a nested sub-region -> keep the largest.
+    whole = TextBlock(bbox=(100, 100, 300, 200), text="A B C D", orientation="vertical")
+    sub = TextBlock(bbox=(110, 110, 280, 180), text="A B C", orientation="vertical")
+    distinct = TextBlock(bbox=(500, 100, 100, 50), text="Z", orientation="horizontal")
+
+    kept = _dedup_blocks([whole, sub, distinct])
+    assert whole in kept        # largest kept
+    assert sub not in kept      # nested duplicate dropped
+    assert distinct in kept     # non-overlapping kept

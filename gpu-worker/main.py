@@ -22,7 +22,7 @@ from PIL import Image
 
 from models import BACKEND, DEVICE, _has_japanese, detect_containers, inpaint_text, ocr_crop
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 app = FastAPI(title="Manga Fill GPU worker", version=__version__)
 
@@ -50,6 +50,32 @@ def _iou(a: tuple, b: tuple) -> float:
     return inter / union if union else 0.0
 
 
+def _containment(a: tuple, b: tuple) -> float:
+    """Fraction of the *smaller* box covered by the intersection (nested dedup)."""
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    x0, y0 = max(ax, bx), max(ay, by)
+    x1, y1 = min(ax + aw, bx + bw), min(ay + ah, by + bh)
+    if x1 <= x0 or y1 <= y0:
+        return 0.0
+    inter = (x1 - x0) * (y1 - y0)
+    smaller = min(aw * ah, bw * bh)
+    return inter / smaller if smaller else 0.0
+
+
+def _orientation(w: int, h: int) -> str:
+    """Classify a free-text region by shape (mirrors the app's render._orientation)."""
+    if w <= 16 and h > w * 2:
+        return "furigana"
+    if h > w * 1.5:
+        return "vertical"
+    return "horizontal"
+
+
+def _overlaps(box: tuple, seen: list) -> bool:
+    return any(_iou(box, s) > 0.5 or _containment(box, s) > 0.85 for s in seen)
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "device": DEVICE, "backend": BACKEND, "version": __version__}
@@ -60,9 +86,12 @@ def detect_ocr(image: UploadFile = File(...)) -> dict:
     """Detect bubbles + OCR text. Returns {"bubble": [...], "blocks": [...]}.
 
     Mirrors the app's RT-DETR branch exactly: `text_bubble` regions are OCR'd
-    (dropping empty / single-char hits), `text_free` regions are OCR'd and kept
-    only if they contain Japanese (skips watermarks / page numbers). Blocks are
-    sorted top-to-bottom, then right-to-left within a row.
+    (dropping empty / single-char / non-Japanese hits), and `text_free` regions
+    are split by shape — vertical keeps the full region, horizontal keeps the
+    individual lines — with nested/overlapping detections deduped so the same
+    stat column isn't returned both whole and line-by-line (which made the app
+    typeset English on top of English). Blocks are sorted top-to-bottom, then
+    right-to-left within a row.
     """
     img = _load(image)
     det = detect_containers(img)
@@ -71,8 +100,9 @@ def detect_ocr(image: UploadFile = File(...)) -> dict:
     blocks: list[dict] = []
     seen: list[tuple] = []
 
-    for (x, y, w, h) in det["text_bubble"]:
-        if any(_iou((x, y, w, h), s) > 0.5 for s in seen):
+    # 1) dialogue inside bubbles — always vertical, keep the full region
+    for (x, y, w, h) in sorted(det["text_bubble"], key=lambda b: -(b[2] * b[3])):
+        if _overlaps((x, y, w, h), seen):
             continue
         text, _conf = ocr_crop(image_np, (x, y, w, h))
         if not text or len(text.strip()) <= 1 or not _has_japanese(text):
@@ -80,13 +110,27 @@ def detect_ocr(image: UploadFile = File(...)) -> dict:
         blocks.append({"bbox": [x, y, w, h], "text": text, "orientation": "vertical"})
         seen.append((x, y, w, h))
 
-    for (x, y, w, h) in det["text_free"]:
-        if any(_iou((x, y, w, h), s) > 0.5 for s in seen):
+    # 2) free text — split by shape, dedup each group with the right strategy
+    free = det["text_free"]
+    free_vertical = [(x, y, w, h) for (x, y, w, h) in free if _orientation(w, h) != "horizontal"]
+    free_horizontal = [(x, y, w, h) for (x, y, w, h) in free if _orientation(w, h) == "horizontal"]
+
+    for (x, y, w, h) in sorted(free_vertical, key=lambda b: -(b[2] * b[3])):
+        if _overlaps((x, y, w, h), seen):
             continue
         text, _conf = ocr_crop(image_np, (x, y, w, h))
         if not text or not _has_japanese(text):
             continue
-        blocks.append({"bbox": [x, y, w, h], "text": text, "orientation": "vertical"})
+        blocks.append({"bbox": [x, y, w, h], "text": text, "orientation": _orientation(w, h)})
+        seen.append((x, y, w, h))
+
+    for (x, y, w, h) in sorted(free_horizontal, key=lambda b: b[2] * b[3]):
+        if _overlaps((x, y, w, h), seen):
+            continue
+        text, _conf = ocr_crop(image_np, (x, y, w, h))
+        if not text or not _has_japanese(text):
+            continue
+        blocks.append({"bbox": [x, y, w, h], "text": text, "orientation": "horizontal"})
         seen.append((x, y, w, h))
 
     blocks.sort(key=lambda b: (b["bbox"][1], -b["bbox"][0]))

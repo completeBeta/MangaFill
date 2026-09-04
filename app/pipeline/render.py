@@ -57,6 +57,29 @@ def _drop_non_japanese(blocks: list[TextBlock]) -> list[TextBlock]:
     return [b for b in blocks if b.text and _has_japanese(b.text)]
 
 
+def _dedup_blocks(blocks: list[TextBlock]) -> list[TextBlock]:
+    """Drop nested/overlapping OCR'd blocks so a region is typeset once.
+
+    The remote GPU worker returns the same text at several granularities (a whole
+    region plus its sub-regions / the same line OCR'd twice), which otherwise
+    re-letters English on top of English. Keeps the largest block per cluster
+    (most complete text) and drops anything that overlaps it. This is a safety
+    net: the worker's own per-orientation dedup is the primary fix.
+    """
+    if len(blocks) <= 1:
+        return blocks
+    kept: list[TextBlock] = []
+    for b in sorted(blocks, key=lambda x: -(x.bbox[2] * x.bbox[3])):
+        if any(
+            _iou(b.bbox, k.bbox) > 0.5 or _box_containment(b.bbox, k.bbox) > 0.85
+            for k in kept
+        ):
+            continue
+        kept.append(b)
+    kept.sort(key=lambda b: (b.bbox[1], -b.bbox[0]))
+    return kept
+
+
 def _iou(a: tuple, b: tuple) -> float:
     """Intersection-over-union of two (x, y, w, h) boxes."""
     ax, ay, aw, ah = a
@@ -258,8 +281,9 @@ def render_translated_page(
     # Drop already-English text (pre-translated pages, English stat lines,
     # watermarks) so it is left byte-for-byte untouched — never re-translated or
     # re-lettered on top of existing English. Covers the remote-worker path too,
-    # which returns blocks without this filter.
-    blocks = _drop_non_japanese(blocks)
+    # which returns blocks without this filter. Also dedup nested/overlapping
+    # blocks (the worker returns the same region at several granularities).
+    blocks = _dedup_blocks(_drop_non_japanese(blocks))
 
     # ---- translate (cloud LLM) ----------------------------------------------
     if dry_run:
