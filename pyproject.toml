@@ -1,6 +1,6 @@
 [project]
 name = "manga-fill"
-version = "0.18.4"
+version = "0.19.0"
 description = "Translate raw Japanese manga to English — detect → OCR → translate → inpaint → typeset."
 readme = "README.md"
 requires-python = ">=3.11"

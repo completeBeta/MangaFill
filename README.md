@@ -34,6 +34,19 @@ Still to build: web UI, batch/state, deploy. Known limits: bubble-aware typesett
 
 ## Run
 
+**Pull the image (no build):**
+
+```bash
+docker pull ghcr.io/completebeta/manga-fill-app:latest
+# run it, mounting a data dir + your API key:
+docker run -d --name mangafill -p 8788:8788 \
+  -e MANGA_FILL_DEFAULT_API_KEY=your-key \
+  -v /path/to/data:/data -v /path/to/input:/input \
+  ghcr.io/completebeta/manga-fill-app:latest
+```
+
+**Or build locally:**
+
 ```bash
 cp .env.example .env          # add your model API key (MANGA_FILL_DEFAULT_API_KEY)
 docker compose up -d --build

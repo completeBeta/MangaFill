@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.19.0] - 2026-09-04
+
+### Added
+- **App image on GHCR** — the Manga Fill app now builds and publishes to `ghcr.io/completebeta/manga-fill-app` (`latest` + `latest-v0.19.0`) via a new GitHub Actions workflow (`.github/workflows/app.yml`), so it can be pulled on Unraid or any Docker host without building: `docker pull ghcr.io/completebeta/manga-fill-app:latest`. The app container is CPU-first; GPU acceleration comes from the separate GPU worker image.
+
 ## [0.18.4] - 2026-09-04
 
 ### Changed
