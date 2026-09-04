@@ -1,0 +1,37 @@
+# Manga Fill GPU worker — CPU-only variant (no GPU required).
+#
+# Same code and API as the GPU workers, but runs the models on CPU. Useful for:
+#   * testing the worker contract on a machine with no GPU,
+#   * offloading CPU inference to a separate host so the app host stays light.
+# Torch is installed from the CPU wheel index (no CUDA/ROCm bloat), pinned to
+# 2.5.1 to match the NVIDIA/ROCm images.
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HF_HOME=/root/.cache/huggingface
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgomp1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir --no-deps simple-lama-inpainting
+
+COPY main.py models.py ./
+
+# manga-ocr tokenizer patch (mirrors the app + GPU worker Dockerfiles).
+RUN python -c "import manga_ocr, os; p=os.path.join(os.path.dirname(manga_ocr.__file__),'ocr.py'); s=open(p).read(); s=s.replace('AutoTokenizer.from_pretrained(pretrained_model_name_or_path)', 'AutoTokenizer.from_pretrained(pretrained_model_name_or_path, tokenizer_type=\"bert-japanese\")'); open(p,'w').write(s)"
+
+# Bake the model weights in at build time.
+RUN python -c "from models import warmup; warmup()"
+
+EXPOSE 9001
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "9001", "--workers", "1"]

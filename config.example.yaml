@@ -1,0 +1,49 @@
+# Manga Fill — example config. Copy to config.yaml (git-ignored) and edit.
+# Secrets (API keys) live in .env, never here. All values shown are safe defaults.
+
+app:
+  host: 0.0.0.0
+  port: 8788                # Subber=8676, Michibiki=5001, SearXNG=8080
+  log_level: INFO
+  max_workers: 1            # one pipeline at a time (single-tenant models/GPU)
+
+pipeline:
+  dry_run: true             # DEFAULT TRUE — detect+OCR+translate, but do NOT inpaint/typeset/write
+  source_lang: jp
+  target_lang: en
+  device: auto               # auto | cpu | cuda — local vision device (auto = CUDA/ROCm if available)
+  vertical_text: auto       # auto-detect vertical lines; typeset EN horizontally
+  detect:
+    engine: auto            # manga-text-segmentation | paddleocr | yolov8
+  inpaint:
+    engine: lama            # lama | fill
+    solid_threshold: 0.06   # std-dev below → cheap fill, above → LaMa
+  typeset:
+    # Font is auto-detected: $MANGA_FILL_FONT override, then any .ttf/.otf in
+    # fonts/ or /app/fonts, then DejaVu Sans Bold as fallback. The Docker image
+    # auto-pulls Anime Ace (Blambot, freeware/non-profit) into /app/fonts at
+    # build time; mount a licensed face there to override it (e.g. Wild Words).
+    font: /app/fonts/comic.ttf
+    min_font_pt: 10
+    outline_width: 2
+    max_scale_down_steps: 6
+
+translation:                 # CLOUD ONLY — no local GPU. Model is configurable.
+  gateway: deepseek
+  model: deepseek-v4-flash   # primary (2026-08-31) — fixes dialogue errors, cheap/fast
+  base_url: https://api.deepseek.com/v1
+  candidates:                # A/B pool — keep whichever translates best
+    - deepseek-v4-flash
+    - meta-llama/llama-3.1-8b-instruct
+    - google/gemini-2.0-flash
+  max_retries: 3
+
+output:
+  mode: folder               # folder | cbz  (browser download is ALWAYS available)
+  dir: /data/output
+  assemble_cbz: false        # leave-as-is default — never auto re-assemble a chapter
+
+storage:
+  state_db: /data/mangafill.db
+  jobs_dir: /data/jobs
+  raw_dir: /input

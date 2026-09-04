@@ -1,0 +1,17 @@
+.git
+.gitignore
+.dockerignore
+.venv
+__pycache__
+*.pyc
+.env
+config
+data
+uploads
+hf-cache
+fonts/AnimeAce-*
+tests
+*.db
+.pytest_cache
+output
+scripts

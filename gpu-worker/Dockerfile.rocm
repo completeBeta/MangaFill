@@ -1,0 +1,52 @@
+# Manga Fill GPU worker — AMD ROCm variant.
+#
+# Same code and API as the NVIDIA worker (`Dockerfile`); only the base image
+# differs. This runs the three vision models on an AMD GPU via ROCm. It uses
+# PyTorch 2.9.1 on ROCm 7.0.2 — the first wheel line that ships gfx1030 (RDNA2)
+# kernels — so a SINGLE image covers three generations:
+#
+#   * RDNA4 — RX 9000 series (gfx1200 / gfx1201)
+#   * RDNA3 — RX 7000 series (gfx1100 / gfx1101 / gfx1102)
+#   * RDNA2 — RX 6000 series (gfx1030)
+#   * Instinct MI200 / MI300
+#
+# RDNA1 (RX 5000, gfx1010/1012) is NOT supported by ROCm — no PyTorch build
+# targets it, so there is no image for it (see README.md).
+#
+# torch here is 2.9.1 (vs 2.5.1 on NVIDIA, which must stay pinned for Pascal
+# sm_61). `models.py` handles both: the pickle-safety lift is guarded by a
+# torch<2.6 check and is a no-op here (manga-ocr's checkpoint is a pure-tensor
+# state_dict that loads fine under weights_only=True).
+FROM rocm/pytorch:rocm7.0.2_ubuntu22.04_py3.11_pytorch_release_2.9.1
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HF_HOME=/root/.cache/huggingface
+
+WORKDIR /app
+
+# libgomp1 for numpy OpenMP; libglib2.0-0 for opencv-python-headless (import cv2).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgomp1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# deps first (cached separately from the code COPY)
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir --no-deps simple-lama-inpainting
+
+COPY main.py models.py ./
+
+# manga-ocr 0.1.16 predates the newer transformers tokenizer auto-detection;
+# force the bert-japanese tokenizer (mirrors the app + NVIDIA worker Dockerfiles).
+RUN python -c "import manga_ocr, os; p=os.path.join(os.path.dirname(manga_ocr.__file__),'ocr.py'); s=open(p).read(); s=s.replace('AutoTokenizer.from_pretrained(pretrained_model_name_or_path)', 'AutoTokenizer.from_pretrained(pretrained_model_name_or_path, tokenizer_type=\"bert-japanese\")'); open(p,'w').write(s)"
+
+# Bake the model weights in at build time so the first request is instant and the
+# container needs no runtime network access to HuggingFace.
+RUN python -c "from models import warmup; warmup()"
+
+EXPOSE 9001
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "9001", "--workers", "1"]

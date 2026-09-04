@@ -1,0 +1,13 @@
+# ML dependencies for the pipeline, installed as a separate layer BEFORE the
+# code COPY so Docker caches them across code-only rebuilds (a `git pull +
+# rebuild` then takes seconds instead of re-downloading ~2 GB of torch/paddle).
+#
+# torch + torchvision are installed separately (CPU-only index) and
+# simple-lama-inpainting is installed with --no-deps (its stale pillow<10 /
+# numpy<2 pins conflict) — see Dockerfile. Keep in sync with the `ml` extras in
+# pyproject.toml.
+transformers>=4.49
+manga-ocr>=0.1.16
+paddleocr>=3.0
+onnxruntime>=1.16
+opencv-python>=4.8

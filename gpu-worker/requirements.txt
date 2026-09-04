@@ -1,0 +1,11 @@
+# GPU worker dependencies. torch/torchvision come from the base image
+# (pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime) so they are NOT listed here —
+# pinning torch here would overwrite the CUDA build with a CPU wheel.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+pillow>=10.0
+numpy<2.0
+transformers>=4.49
+manga-ocr>=0.1.16
+opencv-python-headless>=4.8

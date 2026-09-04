@@ -1,0 +1,14 @@
+services:
+  mangafill:
+    build: .
+    container_name: mangafill
+    ports:
+      - "8788:8788"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+      - ./uploads:/input
+      - ./config:/app/config
+      - ./hf-cache:/root/.cache/huggingface   # persist downloaded models (manga-ocr, detector, LaMa)
+    restart: unless-stopped

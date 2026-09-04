@@ -1,0 +1,38 @@
+# Secrets — NEVER commit
+.env
+config.yaml
+config/*.yaml
+
+# Runtime data
+data/
+uploads/
+*.db
+*.sqlite
+
+# Font files — bundled OFL faces ARE committed (fonts/Bangers-*, ComicNeue-*,
+# PatrickHand-*, GloriaHallelujah-* + their OFL licenses). Only the
+# non-redistributable Blambot font (Anime Ace) is kept out of git — it's pulled
+# at build time into /app/fonts (see Dockerfile).
+fonts/AnimeAce-*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Local git credential cache
+.git-credentials
+
+# Scratch eval scripts (reference local fixture paths outside the repo)
+scripts/
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
+
+# Generated output (translated/annotated pages — copyrighted source material)
+output/

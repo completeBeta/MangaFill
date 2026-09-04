@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manga Fill</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ version }}">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v={{ version }}">
+</head>
+<body>
+  <header>
+    <h1>Manga Fill</h1>
+    <span class="version">v{{ version }}</span>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="jobs">Jobs</button>
+    <button class="tab" data-tab="upload">Upload</button>
+    <button class="tab" data-tab="settings">Settings</button>
+    <button class="tab" data-tab="logs">Logs</button>
+  </nav>
+
+  <main>
+    <!-- Jobs -->
+    <section id="tab-jobs" class="panel active">
+      <div class="toolbar">
+        <h2>Jobs</h2>
+        <div class="toolbar-actions">
+          <button id="clear-all-jobs" class="btn danger small">Clear all</button>
+          <button id="refresh-jobs" class="btn">Refresh</button>
+        </div>
+      </div>
+      <div id="jobs-list" class="jobs-list">
+        <p class="muted">No jobs yet — upload some pages.</p>
+      </div>
+    </section>
+
+    <!-- Upload -->
+    <section id="tab-upload" class="panel">
+      <h2>Upload</h2>
+      <p class="muted">Single page, a batch of images, or a .cbz. Fully automatic — no review step.</p>
+      <form id="upload-form">
+        <label class="field">
+          <span>Files</span>
+          <input type="file" id="upload-files" accept=".jpg,.jpeg,.png,.webp,.cbz,.zip" multiple required>
+        </label>
+        <label class="field">
+          <span>Name (optional)</span>
+          <input type="text" id="upload-name" placeholder="e.g. chapter-42">
+        </label>
+        <label class="field">
+          <span>Model</span>
+          <select id="upload-model"></select>
+        </label>
+        <label class="field">
+          <span>Output mode</span>
+          <select id="upload-mode">
+            <option value="folder" selected>Folder (leave pages as-is)</option>
+            <option value="cbz">Re-assemble CBZ</option>
+            <option value="mirror">Mirror input format</option>
+          </select>
+        </label>
+        <button type="submit" class="btn primary">Start translation</button>
+      </form>
+      <div id="upload-status" class="muted"></div>
+    </section>
+
+    <!-- Settings -->
+    <section id="tab-settings" class="panel">
+      <h2>Settings</h2>
+      <div class="settings-form">
+        <div class="settings-section">
+          <div class="toolbar">
+            <h3>Models</h3>
+            <button id="model-add" class="btn small">+ Add model</button>
+          </div>
+          <div id="models-list" class="models-list"></div>
+          <div id="model-editor" class="model-editor hidden"></div>
+        </div>
+
+        <div class="settings-section">
+          <div class="toolbar">
+            <h3>Fonts</h3>
+            <span id="fonts-status" class="muted"></span>
+          </div>
+          <p class="muted">Lettering face for translated dialogue. Anime Ace (pulled at build) is the default manga look; the bundled OFL fonts are always-available fallbacks.</p>
+          <div id="fonts-list" class="fonts-list"></div>
+          <div id="fonts-note" class="warn"></div>
+        </div>
+
+        <div class="settings-section">
+          <div class="toolbar">
+            <h3>GPU</h3>
+            <span id="gpu-status-badge" class="badge muted">CPU only</span>
+          </div>
+          <p class="muted">Vision acceleration (detect / OCR / inpaint) runs on a local GPU when one is available, offloads to a remote GPU worker over HTTP, or falls back to CPU. Translation always stays on the cloud. <a href="https://github.com/completeBeta/MangaFill/blob/main/gpu-worker/SETUP_GUIDE.md" target="_blank" rel="noopener">GPU worker setup guide ↗</a></p>
+          <label class="field">
+            <span>Device (local)</span>
+            <select id="gpu-device">
+              <option value="auto">Auto — GPU if available, else CPU</option>
+              <option value="cuda">GPU (NVIDIA CUDA / AMD ROCm)</option>
+              <option value="cpu">CPU only</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>GPU worker URL (optional)</span>
+            <input type="text" id="gpu-worker-url" placeholder="e.g. http://gpu-host:9001">
+          </label>
+          <p class="muted" id="gpu-resolved"></p>
+          <div class="toolbar">
+            <button id="gpu-save" class="btn primary small">Save GPU settings</button>
+            <span id="gpu-status" class="muted"></span>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>General</h3>
+          <label class="field">
+            <span>Default output mode</span>
+            <select id="settings-mode">
+              <option value="folder">Folder (leave pages as-is)</option>
+              <option value="cbz">Re-assemble CBZ</option>
+              <option value="mirror">Mirror input format</option>
+            </select>
+          </label>
+          <label class="field checkbox">
+            <input type="checkbox" id="settings-dry-run">
+            <span>Dry run (detect + OCR only — no translation, no cost)</span>
+          </label>
+          <div class="toolbar">
+            <button id="settings-save" class="btn primary">Save settings</button>
+            <span id="settings-status" class="muted"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Logs -->
+    <section id="tab-logs" class="panel">
+      <div class="toolbar">
+        <h2>Logs</h2>
+        <label>Lines
+          <select id="logs-lines">
+            <option>100</option>
+            <option selected>200</option>
+            <option>500</option>
+            <option>1000</option>
+          </select>
+        </label>
+        <label class="checkbox"><input type="checkbox" id="logs-auto" checked> auto-refresh</label>
+        <button id="refresh-logs" class="btn">Refresh</button>
+        <a id="logs-download" class="btn" href="/api/logs?lines=100000" download="mangafill.log">Download</a>
+      </div>
+      <pre id="logs-view" class="logs"></pre>
+    </section>
+  </main>
+
+  <!-- Side-by-side viewer -->
+  <div id="viewer" class="viewer hidden">
+    <div class="viewer-bar">
+      <span id="viewer-title"></span>
+      <div class="viewer-nav">
+        <button id="viewer-prev">◀ Prev</button>
+        <span id="viewer-pos"></span>
+        <button id="viewer-next">Next ▶</button>
+      </div>
+      <button id="viewer-close">✕</button>
+    </div>
+    <div class="viewer-panes">
+      <figure><figcaption>Original</figcaption><img id="viewer-orig" alt="original"></figure>
+      <figure><figcaption>Translated</figcaption><img id="viewer-trans" alt="translated"></figure>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v={{ version }}"></script>
+</body>
+</html>
