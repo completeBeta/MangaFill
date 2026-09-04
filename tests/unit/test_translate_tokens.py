@@ -35,6 +35,9 @@ def test_clean_translation_rejects_placeholders():
     assert translate._clean_translation("  [untranslatable]  ") == ""
     assert translate._clean_translation("[no translation]") == ""
     assert translate._clean_translation("untranslatable") == ""
+    # bare/hyphenated refusal forms the model emits on garbled OCR
+    assert translate._clean_translation("(Garbled text-unable to translate meaningfully)") == ""
+    assert translate._clean_translation("cannot translate this") == ""
 
 
 def test_clean_translation_rejects_pure_japanese():

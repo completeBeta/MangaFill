@@ -50,6 +50,11 @@ _PLACEHOLDER_MARKERS = (
     "[no translation]",
     "[unable to translate]",
     "[cannot be translated]",
+    # bare / hyphenated refusal forms (the model can't read garbled OCR):
+    "unable to translate",
+    "cannot translate",
+    "garbled text",
+    "meaningless",
 )
 
 

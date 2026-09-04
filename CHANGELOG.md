@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.19.3] - 2026-09-04
+
+### Fixed
+- **Literal refusal text leaked onto the page** — when the model can't read garbled OCR it sometimes returns a bare/hyphenated refusal like `(Garbled text-unable to translate meaningfully)` that the placeholder filter didn't catch. Added the bare `unable to translate` / `cannot translate` / `garbled text` / `meaningless` markers so these are dropped instead of typeset.
+
 ## [0.19.2] - 2026-09-04
 
 ### Fixed
