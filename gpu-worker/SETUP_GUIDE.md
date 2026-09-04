@@ -9,6 +9,11 @@ over HTTP. The Manga Fill app calls it when you point it at the worker URL. If
 the worker is ever down, the app silently falls back to CPU — so this is a
 "make it faster" add-on, never a hard requirement.
 
+> **Pre-built images — no build needed.** Pull the image for your GPU from
+> `ghcr.io/completebeta/manga-fill-gpu:<tag>` (tags: `latest`, `pascal`, `rocm`,
+> `cpu`). The `docker build` commands below are only for developers building from
+> source.
+
 ---
 
 ## Step 0 — Which image do I need?

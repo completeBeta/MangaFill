@@ -40,20 +40,19 @@ Four images, identical code and API — only the base image / torch build differ
   **RDNA1 (RX 5000) is NOT supported** by ROCm.
 - **CPU** — anything, just slower.
 
-## Quick start (compose)
+## Install — pull a pre-built image (no build needed)
 
 ```bash
-cd gpu-worker
-
-# 1. Build the image for YOUR gpu:
-docker build -t mangafill-gpu:latest  .                       # NVIDIA RTX 20/30/40/50
-docker build -t mangafill-gpu:pascal -f Dockerfile.pascal .   # NVIDIA P2000 / GTX 10
-docker build -t mangafill-gpu:rocm   -f Dockerfile.rocm  .    # AMD RX 6000/7000/9000
-docker build -t mangafill-gpu:cpu    -f Dockerfile.cpu   .    # no GPU
-
-# 2. Start it (profile = nvidia | pascal | rocm | cpu):
-docker compose --profile nvidia up -d
+# pick ONE:
+docker pull ghcr.io/completebeta/manga-fill-gpu:latest   # NVIDIA RTX 20/30/40/50
+docker pull ghcr.io/completebeta/manga-fill-gpu:pascal   # NVIDIA P2000 / GTX 10
+docker pull ghcr.io/completebeta/manga-fill-gpu:rocm     # AMD RX 6000/7000/9000
+docker pull ghcr.io/completebeta/manga-fill-gpu:cpu      # no GPU
 ```
+
+See **[SETUP_GUIDE.md](SETUP_GUIDE.md)** for the full run steps (Unraid / Linux /
+AMD passthrough). Building from source is still supported for developers via the
+`Dockerfile*` + compose profiles (`docker compose --profile <nvidia|pascal|rocm|cpu> up -d`).
 
 ## Verify
 
