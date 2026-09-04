@@ -8,6 +8,7 @@ shift alignment. Returns (translations, cost_usd); mutates `translation` field.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 import httpx
 
@@ -57,13 +58,41 @@ def _has_cjk(text: str) -> bool:
     return any(lo <= ch <= hi for lo, hi in _CJK_RANGES for ch in text)
 
 
+# Typographic/Unicode characters small models emit that the comic fonts (Anime
+# Ace, etc.) don't carry a glyph for — rendered as an empty box ("tofu").
+_PUNCT_TO_ASCII = {
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",   # curly single quotes
+    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',   # curly double quotes
+    "\u2013": "-", "\u2014": "-", "\u2015": "-",   # en/em/horizontal-bar dashes
+    "\u2212": "-",    # minus sign
+    "\u2026": "...",  # ellipsis
+    "\u2022": "-",    # bullet
+    "\u00b7": "-",    # middle dot
+    "\u00a0": " ",    # non-breaking space
+    "\u2009": " ", "\u200a": " ",   # thin spaces
+    "\u3000": " ",    # ideographic space
+}
+
+
+def _normalize_ascii(s: str) -> str:
+    """Map a translation to plain ASCII so every glyph the typesetter draws has
+    a font glyph (no empty box / tofu). Decomposes accented Latin (é -> e), maps
+    typographic punctuation to ASCII, and drops anything still non-ASCII (leaked
+    kana/kanji, stray symbols)."""
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = "".join(_PUNCT_TO_ASCII.get(ch, ch) for ch in s)
+    s = "".join(ch for ch in s if ord(ch) < 128)
+    return s.strip()
+
+
 def _clean_translation(raw: str) -> str:
-    """Return a usable English translation, or "" if the line should be skipped.
+    """Return a usable ASCII English translation, or "" if the line is skipped.
 
     Rejects placeholder/refusal markers and text that is still Japanese (the
-    model echoing the source back). Strips stray CJK so a translation that is
-    mostly English but carries a leaked kanji/kana isn't dropped wholesale —
-    only a line with no usable Latin content is treated as untranslated.
+    model echoing the source back). Normalizes to ASCII so a translation that is
+    mostly English but carries a leaked kanji/kana or smart punctuation is
+    cleaned to renderable glyphs rather than dropped wholesale or drawn as tofu.
     """
     s = (raw or "").strip()
     if not s:
@@ -71,11 +100,10 @@ def _clean_translation(raw: str) -> str:
     low = s.lower()
     if any(m in low for m in _PLACEHOLDER_MARKERS):
         return ""
-    latin = "".join(ch for ch in s if not _has_cjk(ch))
-    latin = latin.strip()
-    if not latin:
-        return ""  # entirely Japanese — the model echoed instead of translating
-    return latin
+    ascii_s = _normalize_ascii(s)
+    if not ascii_s:
+        return ""  # entirely non-ASCII — the model echoed Japanese instead
+    return ascii_s
 
 
 def translate_lines(

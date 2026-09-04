@@ -44,6 +44,19 @@ def _has_japanese(text: str) -> bool:
     )
 
 
+def _drop_non_japanese(blocks: list[TextBlock]) -> list[TextBlock]:
+    """Drop blocks whose OCR text isn't Japanese.
+
+    Raw manga is kana/kanji; anything OCR'd back without Japanese is already-
+    English content (a pre-translated page, an English stat line, a watermark).
+    Those must be left byte-for-byte untouched — re-translating them re-letters
+    English on top of English. Applied to the merged block list so it covers the
+    remote GPU-worker path and the PP-OCR fallback too, not just the local
+    detector.
+    """
+    return [b for b in blocks if b.text and _has_japanese(b.text)]
+
+
 def _iou(a: tuple, b: tuple) -> float:
     """Intersection-over-union of two (x, y, w, h) boxes."""
     ax, ay, aw, ah = a
@@ -123,8 +136,8 @@ def _build_blocks_from_det(det: dict, image_np: np.ndarray) -> list[TextBlock]:
     # 1) dialogue inside bubbles — always vertical, keep the full region
     for (x, y, w, h) in _dedup_boxes(det["text_bubble"], seen, keep="largest"):
         text, conf = ocr_crop(image_np, (x, y, w, h))
-        if not text or len(text.strip()) <= 1:
-            continue
+        if not text or len(text.strip()) <= 1 or not _has_japanese(text):
+            continue  # already-English / non-JP bubble — leave untouched
         blocks.append(TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
                                 orientation="vertical"))
         seen.append((x, y, w, h))
@@ -241,6 +254,12 @@ def render_translated_page(
             bubbles = None
             emit("ocr")
             blocks = process_page(image_path)
+
+    # Drop already-English text (pre-translated pages, English stat lines,
+    # watermarks) so it is left byte-for-byte untouched — never re-translated or
+    # re-lettered on top of existing English. Covers the remote-worker path too,
+    # which returns blocks without this filter.
+    blocks = _drop_non_japanese(blocks)
 
     # ---- translate (cloud LLM) ----------------------------------------------
     if dry_run:

@@ -22,7 +22,7 @@ from PIL import Image
 
 from models import BACKEND, DEVICE, _has_japanese, detect_containers, inpaint_text, ocr_crop
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 app = FastAPI(title="Manga Fill GPU worker", version=__version__)
 
@@ -75,7 +75,7 @@ def detect_ocr(image: UploadFile = File(...)) -> dict:
         if any(_iou((x, y, w, h), s) > 0.5 for s in seen):
             continue
         text, _conf = ocr_crop(image_np, (x, y, w, h))
-        if not text or len(text.strip()) <= 1:
+        if not text or len(text.strip()) <= 1 or not _has_japanese(text):
             continue
         blocks.append({"bbox": [x, y, w, h], "text": text, "orientation": "vertical"})
         seen.append((x, y, w, h))

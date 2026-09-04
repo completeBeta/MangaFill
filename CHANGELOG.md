@@ -2,6 +2,15 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.19.1] - 2026-09-04
+
+### Fixed
+- **Already-English pages re-translated and re-lettered on top of themselves** — the "is this Japanese?" gate was applied to free text but not speech-bubble text, and not at all on the remote GPU-worker path, so pre-translated pages (covers, TOC, character intros) got OCR'd and "translated" again, painting English over existing English. Blocks whose OCR text has no kana/kanji are now dropped (`_drop_non_japanese`) at the pipeline choke-point, covering the local detector, the remote GPU worker, and the PP-OCR fallback. An all-English page now yields zero blocks and is returned byte-for-byte unchanged.
+- **Empty-box ("tofu") glyphs in typeset text** — translations carrying smart punctuation (curly quotes, em/en-dashes, ellipses) or accented Latin had no glyph in the comic fonts and rendered as hollow rectangles. Translations are now normalized to plain ASCII (`_normalize_ascii`: NFKD decomposition + typographic-punctuation mapping + non-ASCII strip) before typesetting.
+
+### Changed
+- GPU worker `/detect-ocr` now drops non-Japanese speech-bubble text (worker 0.2.1), matching the app.
+
 ## [0.19.0] - 2026-09-04
 
 ### Added

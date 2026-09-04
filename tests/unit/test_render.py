@@ -5,6 +5,7 @@ from PIL import Image
 from app.pipeline.render import (
     _box_containment,
     _dedup_boxes,
+    _drop_non_japanese,
     _iou,
     _is_blank,
     _is_color,
@@ -83,3 +84,18 @@ def test_is_blank_and_color():
     red = np.zeros((10, 10, 3), dtype=np.uint8)
     red[:, :, 0] = 255  # pure red — full chroma
     assert _is_color(Image.fromarray(red)) is True
+
+
+def test_drop_non_japanese_filters_english():
+    from app.pipeline.types import TextBlock
+
+    jp = TextBlock(bbox=(0, 0, 10, 30), text="こんにちは", orientation="vertical")
+    mixed = TextBlock(bbox=(0, 0, 10, 30), text="ジョン John", orientation="vertical")
+    en = TextBlock(bbox=(0, 0, 40, 12), text="CONTENTS", orientation="horizontal")
+    empty = TextBlock(bbox=(0, 0, 10, 10), text="", orientation="horizontal")
+
+    kept = _drop_non_japanese([jp, mixed, en, empty])
+    assert jp in kept       # Japanese -> translate
+    assert mixed in kept    # has kana -> translate
+    assert en not in kept   # already-English -> leave untouched
+    assert empty not in kept

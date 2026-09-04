@@ -136,3 +136,18 @@ def test_translate_page_horizontal_only_when_requested(monkeypatch):
     )
     assert out2[0].translation == "Alpha"
     assert out2[1].translation == "Beta"
+
+
+def test_normalize_ascii_maps_smart_punctuation():
+    assert translate._normalize_ascii("It\u2019s \u2014 okay\u2026") == "It's - okay..."
+    assert translate._normalize_ascii("\u201cHello\u201d") == '"Hello"'
+
+
+def test_normalize_ascii_strips_cjk_and_accents():
+    assert translate._normalize_ascii("Pok\u00e9mon \u529b") == "Pokemon"
+    assert translate._normalize_ascii("caf\u00e9") == "cafe"
+
+
+def test_clean_translation_normalizes_to_ascii():
+    # Smart quotes + em-dash + ellipsis map to renderable ASCII (no tofu boxes).
+    assert translate._clean_translation("\u201cI\u2019m fine \u2014 really\u2026\u201d") == "\"I'm fine - really...\""
