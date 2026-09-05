@@ -301,10 +301,14 @@ def inpaint_text(
 
 # ------------------------------------------------------------------ warmup --
 def warmup() -> None:
-    """Force-load all three models (used at Docker build to bake weights in)."""
+    """Force-load all models (used at Docker build to bake weights in)."""
     import io
 
     detect_containers(Image.new("RGB", (64, 64), "white"))
     ocr_crop(np.full((32, 32, 3), 255, dtype=np.uint8), (0, 0, 32, 32))
     inpaint_text(Image.new("RGB", (64, 64), "white"), [(8, 8, 16, 16)])
+    # Bake the PaddleOCR (ko/zh) weights too — downloads to ~/.paddlex at build.
+    blank = Image.new("RGB", (640, 640), "white")
+    ocr_multilingual_blocks(blank, "zh")
+    ocr_multilingual_blocks(blank, "ko")
     print(f"warmup complete on device={DEVICE}")

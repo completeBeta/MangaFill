@@ -11,4 +11,5 @@ services:
       - ./uploads:/input
       - ./config:/app/config
       - ./hf-cache:/root/.cache/huggingface   # persist downloaded models (manga-ocr, detector, LaMa)
+      - ./paddlex-cache:/root/.paddlex        # persist PaddleOCR models (ko/zh PP-OCRv5/v6)
     restart: unless-stopped
