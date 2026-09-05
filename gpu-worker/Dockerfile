@@ -22,15 +22,14 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgomp1 \
         libglib2.0-0 \
+        libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 # deps first (cached separately from the code COPY)
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir --no-deps simple-lama-inpainting \
-    && (pip uninstall -y opencv-python opencv-contrib-python 2>/dev/null || true) \
-    && pip install --no-cache-dir --force-reinstall --no-deps "opencv-python-headless>=4.8,<5.0"
+    && pip install --no-cache-dir --no-deps simple-lama-inpainting
 
 COPY main.py models.py ./
 
