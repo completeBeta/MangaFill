@@ -8,6 +8,7 @@ from app.pipeline.render import (
     _dedup_boxes,
     _drop_non_japanese,
     _drop_titles,
+    _has_chapter_heading,
     _iou,
     _is_blank,
     _is_color,
@@ -146,3 +147,21 @@ def test_split_bullet_lines_keeps_non_bullet():
 
     b = TextBlock(bbox=(0, 0, 100, 50), text="こんにちは", orientation="vertical")
     assert _split_bullet_lines([b]) == [b]
+
+
+def test_has_chapter_heading_detects_toc_and_chapter_pages():
+    from app.pipeline.types import TextBlock
+
+    # TOC / chapter-title pages carry a 第N話/章 marker.
+    toc = [TextBlock(bbox=(0, 0, 100, 30), text="第百五話", orientation="horizontal"),
+           TextBlock(bbox=(0, 40, 100, 30), text="包囲網", orientation="horizontal")]
+    assert _has_chapter_heading(toc) is True
+
+    # Arabic numerals and other counters also count.
+    assert _has_chapter_heading([TextBlock(bbox=(0, 0, 100, 30), text="第105話", orientation="horizontal")]) is True
+    assert _has_chapter_heading([TextBlock(bbox=(0, 0, 100, 30), text="第1章", orientation="horizontal")]) is True
+
+    # Cover/credit/title pages carry no chapter number -> not a TOC.
+    credits = [TextBlock(bbox=(0, 0, 100, 30), text="原作 あずみ圭", orientation="horizontal"),
+               TextBlock(bbox=(0, 40, 100, 30), text="漫画 木野コトラ", orientation="horizontal")]
+    assert _has_chapter_heading(credits) is False

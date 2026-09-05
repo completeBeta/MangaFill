@@ -19,6 +19,8 @@ models, so a down GPU never breaks a job.
 """
 from __future__ import annotations
 
+import re
+
 import numpy as np
 from PIL import Image
 
@@ -42,6 +44,18 @@ def _has_japanese(text: str) -> bool:
         or ("\u3000" <= ch <= "\u303f")     # CJK punctuation (。「」…)
         for ch in text
     )
+
+
+# 第百五話 / 第105話 / 第1章 — a chapter/episode heading. This is a rock-solid
+# marker that the page is a table of contents or a chapter-title page (cover and
+# credit pages carry no chapter numbers), so its horizontal text is safe to
+# translate.
+_CHAPTER_HEADING_RE = re.compile(r"第[〇一二三四五六七八九十百千零0-9]+[話章回編節]")
+
+
+def _has_chapter_heading(blocks) -> bool:
+    """True if any block is a chapter/episode heading (第N話/章/回/編/節)."""
+    return any(_CHAPTER_HEADING_RE.search(b.text or "") for b in blocks)
 
 
 def _drop_non_japanese(blocks: list[TextBlock]) -> list[TextBlock]:
@@ -341,11 +355,14 @@ def render_translated_page(
     else:
         emit("translate")
         # Translate horizontal stat text only on pages that also carry vertical
-        # content (stat/character pages) — a pure-horizontal page (cover/credit
-        # page with only titles + credits) is left as-is.
+        # content (stat/character pages) or a chapter heading (table-of-contents
+        # / chapter-title pages) — a pure-horizontal cover/credit page with only
+        # titles + credits is left as-is.
         has_vertical = any(b.orientation == "vertical" for b in blocks)
+        has_chapter = _has_chapter_heading(blocks)
         blocks, pt, ct = translate_page(
-            blocks, model, api_key, base_url, translate_horizontal=has_vertical
+            blocks, model, api_key, base_url,
+            translate_horizontal=has_vertical or has_chapter,
         )
 
     # ---- resolve typeset targets + erase boxes -------------------------------

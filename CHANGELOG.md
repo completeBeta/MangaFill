@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.19.6] - 2026-09-05
+
+### Fixed
+- **Table-of-contents / chapter-title pages left untranslated** — a pure-horizontal page carrying chapter headings (第N話/章/回/編/節) is now treated as a TOC or chapter-title page and its horizontal text (chapter numbers + titles) is translated, instead of being skipped like a cover/credit page. Cover/credit pages (no chapter numbers) are still left as-is.
+
 ## [0.19.5] - 2026-09-05
 
 ### Fixed
