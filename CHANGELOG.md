@@ -2,6 +2,16 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.20.0] - 2026-09-05
+
+### Added
+- **Multi-language input (Korean + Chinese)** — the pipeline now auto-detects the source language (`auto` default, or force `ja`/`ko`/`zh` in Settings) and routes OCR accordingly: Japanese keeps manga-ocr (GPU worker or local), Korean and Chinese use EasyOCR (Apache-2.0, local CPU). Detection is by OCR confidence (the wrong-language reader emits its script at near-zero confidence). The translation prompt is now language-aware, and the source-text gate accepts hangul in addition to kana/kanji.
+- **Colour webtoon/manhua pages are now translated** — the old `_is_color` skip (which protected B/W manga covers from mangling) applied only to Japanese; Korean webtoons and Chinese manhua are coloured by design and now run the full pipeline.
+
+### Known limitations (this release)
+- Vertical Korean/Chinese text (historical woodcuts, decorative manhua scrolls) OCRs poorly — EasyOCR is horizontal-tuned; a rotation/vertical pass is a future refinement.
+- Tiny single-character utterances and SFX are still skipped (same class as the existing Japanese single-char miss).
+
 ## [0.19.6] - 2026-09-05
 
 ### Fixed

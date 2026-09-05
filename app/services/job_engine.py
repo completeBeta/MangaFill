@@ -162,6 +162,26 @@ def process_job(job_id: int) -> None:
         pages = db.query(Page).filter(Page.job_id == job_id).order_by(Page.index).all()
         stopped = False
 
+        # Source language: an explicit setting wins; "auto" detects it once from
+        # the first page and reuses it for the whole job (per-page detection
+        # would re-OCR every page's probe). Any failure falls back to Japanese.
+        lang = (get_setting(db, "source_lang") or "auto").strip()
+        if lang == "auto" and pages:
+            try:
+                from PIL import Image
+                from app.pipeline.ocr_multilingual import detect_language
+
+                with Image.open(pages[0].original_path) as _first:
+                    first = _first.convert("RGB")
+                lang = detect_language(first)
+                log.info("job %s: auto-detected source language=%s", job_id, lang)
+            except Exception as e:
+                log.warning("job %s: language detection failed (%s) — defaulting to ja",
+                            job_id, e)
+                lang = "ja"
+        if lang not in ("ja", "ko", "zh"):
+            lang = "ja"
+
         def _progress(stage: str) -> None:
             # Live stage for the dashboard's granular progress bar. Committing on
             # every stage change is a handful of writes per page — cheap under WAL.
@@ -187,7 +207,7 @@ def process_job(job_id: int) -> None:
                 img, blocks, pt, ct = render_translated_page(
                     p.original_path, model, key, base_url, dry_run=dry_run,
                     font_id=font_id, gpu_worker_url=gpu_url,
-                    progress_cb=_progress,
+                    progress_cb=_progress, lang=lang,
                 )
                 out_path = _save_output(img, out_dir, p.original_path)
                 p.output_path = out_path

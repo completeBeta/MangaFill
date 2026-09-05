@@ -12,16 +12,22 @@ import unicodedata
 
 import httpx
 
+from .language import LANG_NAMES
 from .types import TextBlock
 
 SYSTEM_PROMPT = (
-    "You are a professional manga translator. Translate each numbered Japanese "
+    "You are a professional comic translator. Translate each numbered {lang} "
     "line to natural, concise English that fits a speech bubble. Preserve tone "
     "(casual/formal/angry) and speaker consistency. Sound effects (onomatopoeia): "
-    "give a brief English equivalent or transliteration (e.g. おえっぷ -> 'Gagh'), "
+    "give a brief English equivalent or transliteration, "
     "not dialogue. Output ONLY numbered lines in the exact format 'N. <translation>', "
     "one per line. No preamble, no explanations, no extra text."
 )
+
+
+def _system_prompt(source_lang: str) -> str:
+    """Build the translation system prompt for the source language."""
+    return SYSTEM_PROMPT.format(lang=LANG_NAMES.get(source_lang, "Japanese"))
 
 
 def _parse_numbered(content: str, n: int) -> list[str]:
@@ -119,6 +125,7 @@ def translate_lines(
     model: str,
     api_key: str,
     base_url: str = "https://openrouter.ai/api/v1",
+    source_lang: str = "ja",
 ) -> tuple[list[str], int, int]:
     """Translate a batch of JP lines to EN.
 
@@ -134,7 +141,7 @@ def translate_lines(
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": _system_prompt(source_lang)},
             {"role": "user", "content": user},
         ],
         "max_tokens": 4000,
@@ -169,6 +176,7 @@ def translate_page(
     api_key: str,
     base_url: str = "https://openrouter.ai/api/v1",
     translate_horizontal: bool = False,
+    source_lang: str = "ja",
 ) -> tuple[list[TextBlock], int, int]:
     """Translate the translatable blocks of a page.
 
@@ -194,7 +202,7 @@ def translate_page(
         return blocks, 0, 0
 
     translations, pt, ct = translate_lines(
-        [b.text for b in translatable], model, api_key, base_url
+        [b.text for b in translatable], model, api_key, base_url, source_lang=source_lang
     )
     for b, en in zip(translatable, translations):
         b.translation = _clean_translation(en)
@@ -206,7 +214,7 @@ def translate_page(
         if b.translation or not b.text:
             continue
         try:
-            (en,), p2, c2 = translate_lines([b.text], model, api_key, base_url)
+            (en,), p2, c2 = translate_lines([b.text], model, api_key, base_url, source_lang=source_lang)
             b.translation = _clean_translation(en)
             pt += p2
             ct += c2

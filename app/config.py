@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Pipeline
     dry_run: bool = True          # default ON — never change the default
-    source_lang: str = "jp"
+    source_lang: str = "auto"     # auto | ja | ko | zh — source language for OCR
     target_lang: str = "en"
     device: str = "auto"          # auto | cpu | cuda — local vision-model device
 

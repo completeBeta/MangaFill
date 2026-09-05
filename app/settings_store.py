@@ -15,6 +15,7 @@ from app.models import Model, Setting
 from app.pipeline.fonts import FONT_CATALOG, default_font_id
 
 _DEVICE_CHOICES = ("auto", "cpu", "cuda")
+_SOURCE_LANG_CHOICES = ("auto", "ja", "ko", "zh")
 
 SETTINGS: dict[str, tuple[str, tuple | None]] = {
     "output_mode": ("folder", ("folder", "cbz", "mirror")),
@@ -22,6 +23,7 @@ SETTINGS: dict[str, tuple[str, tuple | None]] = {
     "font": (default_font_id() or "anime-ace", tuple(f["id"] for f in FONT_CATALOG)),
     "device": (cfg.device if cfg.device in _DEVICE_CHOICES else "auto", _DEVICE_CHOICES),
     "gpu_worker_url": ("", None),  # e.g. http://gpu-host:9001 (remote vision worker)
+    "source_lang": ("auto", _SOURCE_LANG_CHOICES),  # auto | ja | ko | zh
 }
 
 

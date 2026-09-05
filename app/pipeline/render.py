@@ -28,7 +28,9 @@ from .bubble import find_container, is_free_floating
 from .detector import detect_containers, find_parent_bubble
 from .ingest import load_image
 from .inpaint import inpaint_text
+from .language import has_cjk_or_hangul
 from .ocr import ocr_crop
+from .ocr_multilingual import detect_language, read_boxes_text
 from .pipeline import process_page
 from .remote import remote_detect_ocr, remote_inpaint
 from .translate import translate_page
@@ -37,13 +39,10 @@ from .typeset import typeset_page
 
 
 def _has_japanese(text: str) -> bool:
-    """True if `text` has kana/kanji/CJK punct — skips watermarks & page numbers."""
-    return any(
-        ("\u3040" <= ch <= "\u30ff")       # hiragana + katakana
-        or ("\u4e00" <= ch <= "\u9fff")     # kanji
-        or ("\u3000" <= ch <= "\u303f")     # CJK punctuation (。「」…)
-        for ch in text
-    )
+    """True if `text` has kana/kanji/hangul/CJK punct — skips watermarks & page
+    numbers and already-English text. (Name is historical: the gate now also
+    accepts Korean hangul for multi-language input.)"""
+    return has_cjk_or_hangul(text)
 
 
 # 第百五話 / 第105話 / 第1章 — a chapter/episode heading. This is a rock-solid
@@ -274,6 +273,7 @@ def render_translated_page(
     font_id: str | None = None,
     gpu_worker_url: str = "",
     progress_cb=None,
+    lang: str = "auto",
 ) -> tuple[Image.Image, list[TextBlock], int, int]:
     """Run the full pipeline on one page.
 
@@ -287,6 +287,9 @@ def render_translated_page(
     `gpu_worker_url`, when set, offloads detect+OCR and inpaint to the remote
     GPU worker; failures fall back to the local CPU models.
 
+    `lang` is the source language: "ja" (manga-ocr / GPU worker), "ko" or "zh"
+    (EasyOCR, local CPU), or "auto" to detect it from the page.
+
     `progress_cb(stage)`, when provided, is called with one of ``detect``,
     ``ocr``, ``translate``, ``inpaint``, ``typeset`` as the page advances through
     the pipeline — the worker uses it to drive a finer-grained progress bar than
@@ -297,16 +300,37 @@ def render_translated_page(
     image = Image.fromarray(load_image(image_path))
     image_np = np.asarray(image)
 
-    # Blank and colour pages (dividers, covers, colour splashes) are left
-    # byte-for-byte unchanged — there's no dialogue to translate, and running
-    # the B/W pipeline on them erases logo art or produces blank output.
-    if _is_blank(image_np) or _is_color(image):
+    # Blank dividers are left byte-for-byte unchanged — no dialogue to translate.
+    if _is_blank(image_np):
         return image, [], 0, 0
 
-    # ---- detect + OCR (remote GPU worker → local detector → PP-OCRv5) --------
+    if lang == "auto":
+        lang = detect_language(image)
+    if lang not in ("ja", "ko", "zh"):
+        lang = "ja"
+
+    # JP colour pages (covers/splashes) carry no dialogue and the B/W pipeline
+    # mangles colour art — skip them. Korean webtoons & Chinese manhua are
+    # coloured BY DESIGN and carry dialogue, so only the JP path skips colour.
+    if lang == "ja" and _is_color(image):
+        return image, [], 0, 0
+
+    # ---- detect + OCR --------------------------------------------------------
     bubbles = None
     blocks = None
-    if gpu_worker_url:
+    if lang in ("ko", "zh"):
+        # Multilingual OCR (EasyOCR) — horizontal webtoon/manhua text. EasyOCR
+        # returns no bubble regions, so the typesetter places each block at its
+        # own box (webtoon speech boxes are rectangles, not drawn bubbles).
+        emit("detect")
+        blocks = [
+            TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
+                      orientation=_orientation(w, h))
+            for (x, y, w, h), text, conf in read_boxes_text(image, lang)
+            if text and _has_japanese(text)
+        ]
+        bubbles = []
+    elif gpu_worker_url:
         try:
             emit("detect")
             remote = remote_detect_ocr(image, gpu_worker_url)
@@ -357,12 +381,14 @@ def render_translated_page(
         # Translate horizontal stat text only on pages that also carry vertical
         # content (stat/character pages) or a chapter heading (table-of-contents
         # / chapter-title pages) — a pure-horizontal cover/credit page with only
-        # titles + credits is left as-is.
+        # titles + credits is left as-is. Korean/Chinese webtoons & manhua are
+        # the exception: their dialogue is horizontal, so always translate it.
         has_vertical = any(b.orientation == "vertical" for b in blocks)
         has_chapter = _has_chapter_heading(blocks)
         blocks, pt, ct = translate_page(
             blocks, model, api_key, base_url,
-            translate_horizontal=has_vertical or has_chapter,
+            translate_horizontal=has_vertical or has_chapter or (lang in ("ko", "zh")),
+            source_lang=lang,
         )
 
     # ---- resolve typeset targets + erase boxes -------------------------------
