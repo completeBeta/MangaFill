@@ -83,3 +83,21 @@ def test_save_output_preserves_filename(tmp_path):
     out = _save_output(img, str(tmp_path), "/some/job/original/page-033.jpg")
     assert os.path.basename(out) == "page-033.jpg"
     assert os.path.exists(out)
+
+
+def test_download_ext_round_trips_upload_format():
+    from app.api.jobs import _download_ext
+
+    # folder mode (default): round-trip the upload format
+    assert _download_ext("folder", "cbz") == "cbz"
+    assert _download_ext("folder", "zip") == "zip"
+    assert _download_ext("folder", "folder") == "cbz"  # images -> .cbz default
+
+    # mirror mode: match the input format
+    assert _download_ext("mirror", "cbz") == "cbz"
+    assert _download_ext("mirror", "zip") == "zip"
+    assert _download_ext("mirror", "folder") == "cbz"
+
+    # explicit cbz mode always -> .cbz
+    assert _download_ext("cbz", "zip") == "cbz"
+    assert _download_ext("cbz", "folder") == "cbz"

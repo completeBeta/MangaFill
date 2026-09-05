@@ -157,25 +157,36 @@ def stop_job(job_id: int, db: Session = Depends(get_db)):
     return _job_dict(job)
 
 
+def _download_ext(output_mode: str, source_format: str) -> str:
+    """Archive extension the download endpoint should serve (.cbz / .zip).
+
+    Respect the output mode, then round-trip the upload format so a .cbz upload
+    comes back as .cbz (comic readers won't open a file named .zip). Folder
+    uploads default to .cbz.
+    """
+    if output_mode == "cbz":
+        return "cbz"
+    if output_mode == "mirror" and source_format in ("cbz", "zip"):
+        return source_format
+    return source_format if source_format in ("cbz", "zip") else "cbz"
+
+
 @router.get("/{job_id}/download")
 def download(job_id: int, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
-    # Prefer an assembled CBZ, then an assembled ZIP, else zip the folder on the fly.
-    for ext in ("cbz", "zip"):
-        arc = os.path.join(_job_dir(job_id), f"translated.{ext}")
-        if os.path.exists(arc):
-            return FileResponse(arc, filename=f"{job.name}.{ext}")
-    out_dir = _out_dir(job_id)
-    pages = sorted(
-        [f for f in os.listdir(out_dir) if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))],
-        key=_natural_key,
-    )
-    if not pages:
-        raise HTTPException(404, "no output pages yet")
-    zip_path = os.path.join(_job_dir(job_id), "translated.zip")
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
-        for name in pages:
-            zf.write(os.path.join(out_dir, name), arcname=name)
-    return FileResponse(zip_path, filename=f"{job.name}.zip")
+    ext = _download_ext(job.output_mode, job.source_format)
+    arc = os.path.join(_job_dir(job_id), f"translated.{ext}")
+    if not os.path.exists(arc):
+        out_dir = _out_dir(job_id)
+        pages = sorted(
+            [f for f in os.listdir(out_dir) if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))],
+            key=_natural_key,
+        )
+        if not pages:
+            raise HTTPException(404, "no output pages yet")
+        with zipfile.ZipFile(arc, "w", zipfile.ZIP_STORED) as zf:
+            for name in pages:
+                zf.write(os.path.join(out_dir, name), arcname=name)
+    return FileResponse(arc, filename=f"{job.name}.{ext}")

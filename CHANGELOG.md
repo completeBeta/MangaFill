@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.19.5] - 2026-09-05
+
+### Fixed
+- **Download round-trips the upload format** — a `.cbz` upload previously downloaded as `.zip` (comic readers won't open a file named `.zip`). The download endpoint now serves the extension matching the output mode and upload format (`.cbz` → `.cbz`, `.zip` → `.zip`, folder uploads → `.cbz`), instead of always zipping as `.zip`.
+
 ## [0.19.4] - 2026-09-04
 
 ### Fixed
