@@ -42,6 +42,29 @@ def remote_detect_ocr(image: Image.Image, worker_url: str) -> dict:
         return r.json()
 
 
+def remote_ocr_multilingual(
+    image: Image.Image, worker_url: str, lang: str
+) -> list[tuple]:
+    """OCR a Korean/Chinese page on the worker (PaddleOCR PP-OCRv5/v6).
+
+    Returns [(x, y, w, h), text, confidence] — the same shape as the app's
+    `read_boxes_text`, so the caller can feed either source through one
+    block-building path.
+    """
+    with httpx.Client(timeout=TIMEOUT) as c:
+        r = c.post(
+            _url(worker_url, "/ocr-multilingual"),
+            files={"image": ("page.png", _png_bytes(image), "image/png")},
+            data={"lang": lang},
+        )
+        r.raise_for_status()
+        out = []
+        for b in r.json().get("blocks", []):
+            x, y, w, h = b["bbox"]
+            out.append(((x, y, w, h), b.get("text", ""), float(b.get("confidence", 0.0))))
+        return out
+
+
 def remote_inpaint(image: Image.Image, boxes: list[tuple], worker_url: str) -> Image.Image:
     """Erase `boxes` via the worker's LaMa. Returns the inpainted RGB image."""
     with httpx.Client(timeout=TIMEOUT) as c:

@@ -9,3 +9,8 @@ numpy<2.0
 transformers>=4.49
 manga-ocr>=0.1.16
 opencv-python-headless>=4.8
+# Korean + Chinese OCR (PP-OCRv5/v6) — runs on CPU via the ONNX runtime engine
+# (paddle native CPU inference is broken: PIR/oneDNN crash). paddleocr pulls in
+# paddlepaddle (CPU) as a dependency; inference itself goes through onnxruntime.
+paddleocr>=3.0
+onnxruntime>=1.16

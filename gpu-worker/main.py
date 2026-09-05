@@ -20,9 +20,17 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from PIL import Image
 
-from models import BACKEND, DEVICE, _has_japanese, detect_containers, inpaint_text, ocr_crop
+from models import (
+    BACKEND,
+    DEVICE,
+    _has_japanese,
+    detect_containers,
+    inpaint_text,
+    ocr_crop,
+    ocr_multilingual_blocks,
+)
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 
 app = FastAPI(title="Manga Fill GPU worker", version=__version__)
 
@@ -135,6 +143,22 @@ def detect_ocr(image: UploadFile = File(...)) -> dict:
 
     blocks.sort(key=lambda b: (b["bbox"][1], -b["bbox"][0]))
     return {"bubble": det["bubble"], "blocks": blocks}
+
+
+@app.post("/ocr-multilingual")
+def ocr_multilingual(image: UploadFile = File(...), lang: str = Form("zh")) -> dict:
+    """OCR a Korean/Chinese page with PaddleOCR (PP-OCRv5/v6).
+
+    Parallel to `/detect-ocr` (which is Japanese: RT-DETR + manga-ocr). Returns
+    {"blocks": [{"bbox": [x,y,w,h], "text", "confidence"}]} with no bubble
+    regions — webtoon/manhua speech boxes are rectangles, so the app typesets
+    each block at its own box. Vertical text is handled by the textline
+    orientation classifier.
+    """
+    if lang not in ("ko", "zh"):
+        raise HTTPException(status_code=400, detail="lang must be 'ko' or 'zh'")
+    img = _load(image)
+    return {"blocks": ocr_multilingual_blocks(img, lang)}
 
 
 @app.post("/inpaint")

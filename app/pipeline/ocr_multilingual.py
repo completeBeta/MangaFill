@@ -89,6 +89,15 @@ def _drop(lang: str) -> None:
         gc.collect()
 
 
+def drop_all_pipelines() -> None:
+    """Free every cached PaddleOCR pipeline (used when the worker takes over)."""
+    import gc
+
+    if _pipelines:
+        _pipelines.clear()
+        gc.collect()
+
+
 def detect_language(image: Image.Image) -> str:
     """Auto-detect the source language (ja/ko/zh) from a page.
 

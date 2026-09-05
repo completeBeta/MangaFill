@@ -30,9 +30,9 @@ from .ingest import load_image
 from .inpaint import inpaint_text
 from .language import has_cjk_or_hangul
 from .ocr import ocr_crop
-from .ocr_multilingual import detect_language, read_boxes_text
+from .ocr_multilingual import detect_language, drop_all_pipelines, read_boxes_text
 from .pipeline import process_page
-from .remote import remote_detect_ocr, remote_inpaint
+from .remote import remote_detect_ocr, remote_inpaint, remote_ocr_multilingual
 from .translate import translate_page
 from .types import TextBlock
 from .typeset import typeset_page
@@ -325,10 +325,21 @@ def render_translated_page(
         # bubble regions, so the typesetter places each block at its own box
         # (webtoon speech boxes are rectangles, not drawn bubbles).
         emit("detect")
+        boxes = None
+        if gpu_worker_url:
+            try:
+                # Offload to the GPU worker (same PaddleOCR, run off the app's
+                # memory-constrained CPU); fall back to local on any failure.
+                boxes = remote_ocr_multilingual(image, gpu_worker_url, lang)
+                drop_all_pipelines()  # worker does the OCR now; free local models
+            except Exception:
+                boxes = None
+        if boxes is None:
+            boxes = read_boxes_text(image, lang)
         blocks = [
             TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
                       orientation=_orientation(w, h))
-            for (x, y, w, h), text, conf in read_boxes_text(image, lang)
+            for (x, y, w, h), text, conf in boxes
             if text and _has_japanese(text)
         ]
         bubbles = []

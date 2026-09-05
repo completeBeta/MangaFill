@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.22.0] - 2026-09-05
+
+### Added
+- **Korean + Chinese OCR routes through the GPU worker** — when a worker URL is configured, `ko`/`zh` pages offload their PaddleOCR to the worker's new `/ocr-multilingual` endpoint (same PP-OCRv5/v6, same results), freeing the app's memory-constrained CPU for the rest of the pipeline. Falls back to the app's local PaddleOCR if the worker is unreachable. The GPU worker is bumped to 0.3.0 with the PaddleOCR (onnxruntime) stack.
+
 ## [0.21.0] - 2026-09-05
 
 ### Changed

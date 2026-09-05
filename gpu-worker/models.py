@@ -147,6 +147,51 @@ def _has_japanese(text: str) -> bool:
     )
 
 
+# -------------------------------------------------------- multilingual OCR --
+_paddle_pipelines: dict[str, object] = {}
+
+_PADDLE_LANGS = {"ko": "korean", "zh": "ch"}
+
+
+def ocr_multilingual_blocks(image: Image.Image, lang: str) -> list[dict]:
+    """PaddleOCR (PP-OCRv5/v6) full-pipeline detect+recognize for ko/zh.
+
+    Mirrors the app's `app/pipeline/ocr_multilingual.py::read_boxes_text` — keep
+    them in lockstep. Reads VERTICAL text natively via the textline-orientation
+    classifier. Returns [{"bbox": [x,y,w,h], "text": str, "confidence": float}]
+    with boxes in ORIGINAL image coords (`dt_polys`, before any orientation
+    rotation). Runs on CPU through the ONNX runtime engine (paddle native CPU
+    inference is broken: PIR/oneDNN).
+    """
+    global _paddle_pipelines
+    if lang not in _paddle_pipelines:
+        from paddleocr import PaddleOCR  # heavy import — lazy on purpose
+
+        _paddle_pipelines[lang] = PaddleOCR(
+            lang=_PADDLE_LANGS[lang],
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=True,
+            device="cpu",
+            engine="onnxruntime",
+        )
+    arr = np.asarray(image.convert("RGB"))
+    out: list[dict] = []
+    for r in _paddle_pipelines[lang].predict(arr):
+        for poly, text, conf in zip(r["dt_polys"], r["rec_texts"], r["rec_scores"]):
+            text = (text or "").strip()
+            if not text:
+                continue
+            pts = np.asarray(poly)
+            x0, y0 = int(pts[:, 0].min()), int(pts[:, 1].min())
+            x1, y1 = int(pts[:, 0].max()), int(pts[:, 1].max())
+            if x1 <= x0 or y1 <= y0:
+                continue
+            out.append({"bbox": [x0, y0, x1 - x0, y1 - y0], "text": text,
+                        "confidence": float(conf)})
+    return out
+
+
 # ------------------------------------------------------------------ inpaint --
 def _mask_from_boxes(size: tuple[int, int], boxes: list[tuple], dilate: int = 5) -> Image.Image:
     """Binary mask (255 = inpaint) covering each box, dilated to catch full strokes."""
