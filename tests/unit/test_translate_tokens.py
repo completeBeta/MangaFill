@@ -38,6 +38,7 @@ def test_clean_translation_rejects_placeholders():
     # bare/hyphenated refusal forms the model emits on garbled OCR
     assert translate._clean_translation("(Garbled text-unable to translate meaningfully)") == ""
     assert translate._clean_translation("cannot translate this") == ""
+    assert translate._clean_translation("[Unintelligible text-likely OCR corruption]") == ""
 
 
 def test_clean_translation_rejects_pure_japanese():

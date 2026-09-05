@@ -80,6 +80,50 @@ def _dedup_blocks(blocks: list[TextBlock]) -> list[TextBlock]:
     return kept
 
 
+def _drop_titles(blocks: list[TextBlock], page_h: int) -> list[TextBlock]:
+    """Skip large horizontal title/header text (series title, section headers,
+    logos).
+
+    manga-ocr misreads decorative title lettering (e.g. 月が導く異世界道中 OCR'd
+    as 日道異世界中の建築), so "translating" it produces nonsense. Titles/headers
+    are proper nouns / logos — leave them as-is. A block that is BOTH taller than
+    ~15% of the page AND wider than it is tall is a large-font horizontal
+    title/header; a tall-narrow bio paragraph or vertical name banner is kept.
+    """
+    if page_h <= 0:
+        return blocks
+    return [
+        b for b in blocks
+        if not (b.bbox[3] > 0.15 * page_h and b.bbox[2] > b.bbox[3])
+    ]
+
+
+def _split_bullet_lines(blocks: list[TextBlock]) -> list[TextBlock]:
+    """Split bullet-separated stat text (●筋力Ｂ＋●持久力Ｂ...) into per-line
+    blocks so each stat typesets on its own line instead of wrapping as one
+    paragraph. The sub-bbox divides the column evenly by line count (approximate
+    — a two-column stat box becomes one stacked list, still far more readable)."""
+    out: list[TextBlock] = []
+    for b in blocks:
+        if b.text.count("●") <= 1:
+            out.append(b)
+            continue
+        parts = [p.strip() for p in b.text.split("●") if p.strip()]
+        if len(parts) <= 1:
+            out.append(b)
+            continue
+        x, y, w, h = b.bbox
+        n = len(parts)
+        for i, part in enumerate(parts):
+            out.append(TextBlock(
+                bbox=(x, y + int(i * h / n), w, max(1, int(h / n))),
+                text=part,
+                confidence=b.confidence,
+                orientation="horizontal",
+            ))
+    return out
+
+
 def _iou(a: tuple, b: tuple) -> float:
     """Intersection-over-union of two (x, y, w, h) boxes."""
     ax, ay, aw, ah = a
@@ -283,7 +327,11 @@ def render_translated_page(
     # re-lettered on top of existing English. Covers the remote-worker path too,
     # which returns blocks without this filter. Also dedup nested/overlapping
     # blocks (the worker returns the same region at several granularities).
-    blocks = _dedup_blocks(_drop_non_japanese(blocks))
+    # Then skip large stylized titles/logos (mis-OCR'd) and split bulleted stat
+    # columns into per-line blocks so each stat typesets on its own line.
+    blocks = _split_bullet_lines(
+        _drop_titles(_dedup_blocks(_drop_non_japanese(blocks)), image.height)
+    )
 
     # ---- translate (cloud LLM) ----------------------------------------------
     if dry_run:

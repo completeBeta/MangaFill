@@ -7,10 +7,12 @@ from app.pipeline.render import (
     _dedup_blocks,
     _dedup_boxes,
     _drop_non_japanese,
+    _drop_titles,
     _iou,
     _is_blank,
     _is_color,
     _orientation,
+    _split_bullet_lines,
 )
 
 
@@ -114,3 +116,33 @@ def test_dedup_blocks_drops_nested_duplicates():
     assert whole in kept        # largest kept
     assert sub not in kept      # nested duplicate dropped
     assert distinct in kept     # non-overlapping kept
+
+
+def test_drop_titles_skips_large_text():
+    from app.pipeline.types import TextBlock
+
+    title = TextBlock(bbox=(0, 0, 800, 360), text="月が導く異世界道中", orientation="vertical")
+    header = TextBlock(bbox=(0, 500, 500, 300), text="学園生徒の能力チェック", orientation="vertical")
+    bio = TextBlock(bbox=(0, 900, 300, 170), text="あいうえお", orientation="vertical")
+    tall_bio = TextBlock(bbox=(0, 1100, 300, 400), text="長い説明文が入る", orientation="vertical")
+    kept = _drop_titles([title, header, bio, tall_bio], page_h=1600)
+    assert title not in kept     # wide + tall -> title skipped
+    assert header not in kept    # wide + tall -> header skipped
+    assert bio in kept           # short -> kept
+    assert tall_bio in kept      # tall but narrow -> bio kept
+
+
+def test_split_bullet_lines_splits_stat_columns():
+    from app.pipeline.types import TextBlock
+
+    b = TextBlock(bbox=(100, 100, 200, 120), text="●筋力Ｂ＋●持久力Ｂ●防御技術Ｂ", orientation="vertical")
+    out = _split_bullet_lines([b])
+    assert [o.text for o in out] == ["筋力Ｂ＋", "持久力Ｂ", "防御技術Ｂ"]
+    assert all(o.orientation == "horizontal" for o in out)
+
+
+def test_split_bullet_lines_keeps_non_bullet():
+    from app.pipeline.types import TextBlock
+
+    b = TextBlock(bbox=(0, 0, 100, 50), text="こんにちは", orientation="vertical")
+    assert _split_bullet_lines([b]) == [b]

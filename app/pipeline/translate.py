@@ -54,7 +54,10 @@ _PLACEHOLDER_MARKERS = (
     "unable to translate",
     "cannot translate",
     "garbled text",
-    "meaningless",
+    "unintelligible",
+    "illegible",
+    "gibberish",
+    "ocr corruption",
 )
 
 

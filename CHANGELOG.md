@@ -2,6 +2,13 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.19.4] - 2026-09-04
+
+### Fixed
+- **Title/header text garbled** — manga-ocr misreads large decorative title lettering (月が導く異世界道中 OCR'd as 日道異世界中の建築), producing nonsense "translations". Large horizontal titles/headers (taller than ~15% of the page AND wider than tall) are now skipped — series titles and section headers are proper-noun logos that stay as-is, while tall-narrow bio paragraphs are still translated.
+- **Stat columns wrapped as one paragraph** — bulleted stat text (●筋力Ｂ＋●持久力Ｂ…) is split into per-line blocks so each stat typesets on its own line instead of wrapping awkwardly.
+- **More LLM refusal markers** — `[Unintelligible text-likely OCR corruption]` and similar bare refusal forms are now dropped instead of typeset onto the page.
+
 ## [0.19.3] - 2026-09-04
 
 ### Fixed
