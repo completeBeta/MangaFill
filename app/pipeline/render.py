@@ -288,7 +288,7 @@ def render_translated_page(
     GPU worker; failures fall back to the local CPU models.
 
     `lang` is the source language: "ja" (manga-ocr / GPU worker), "ko" or "zh"
-    (EasyOCR, local CPU), or "auto" to detect it from the page.
+    (PaddleOCR PP-OCRv5/v6, local CPU), or "auto" to detect it from the page.
 
     `progress_cb(stage)`, when provided, is called with one of ``detect``,
     ``ocr``, ``translate``, ``inpaint``, ``typeset`` as the page advances through
@@ -319,9 +319,11 @@ def render_translated_page(
     bubbles = None
     blocks = None
     if lang in ("ko", "zh"):
-        # Multilingual OCR (EasyOCR) — horizontal webtoon/manhua text. EasyOCR
-        # returns no bubble regions, so the typesetter places each block at its
-        # own box (webtoon speech boxes are rectangles, not drawn bubbles).
+        # Multilingual OCR (PaddleOCR PP-OCRv5/v6) — webtoon/manhua text,
+        # including VERTICAL lines (PaddleOCR's textline-orientation classifier
+        # rotates vertical text to horizontal before recognition). It returns no
+        # bubble regions, so the typesetter places each block at its own box
+        # (webtoon speech boxes are rectangles, not drawn bubbles).
         emit("detect")
         blocks = [
             TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,

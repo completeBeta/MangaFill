@@ -2,6 +2,13 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.21.0] - 2026-09-05
+
+### Changed
+- **Korean + Chinese OCR: EasyOCR → PaddleOCR (PP-OCRv5/v6)** — EasyOCR is horizontal-tuned and mangled vertical manhua/manhwa text (it read the vertical 作揖 as a single wrong character at 0.003 confidence). PaddleOCR reads vertical text via its built-in textline-orientation classifier and is measurably more accurate on hangul (있기/될까요/물론이죠 vs EasyOCR's 잎기/훨까요/물론이조). Runs on CPU through the ONNX runtime engine (paddle native CPU inference is broken — PIR/oneDNN crash).
+- **Language auto-detection is now kana/hangul-range + confidence** — PaddleOCR's `ch` model reads hanzi AND kana in one model, so detection probes `korean` then `ch` (one pipeline held at a time) and classifies by hangul/kana/confidence. Simpler and more robust than the old three-reader confidence sweep.
+- **Dropped EasyOCR dependency** — removed from `requirements-ml.txt` + `pyproject.toml` (frees its torch model memory on the memory-constrained hosts).
+
 ## [0.20.0] - 2026-09-05
 
 ### Added

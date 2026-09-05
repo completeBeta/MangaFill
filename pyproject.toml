@@ -1,6 +1,6 @@
 [project]
 name = "manga-fill"
-version = "0.20.0"
+version = "0.21.0"
 description = "Translate raw Japanese manga to English — detect → OCR → translate → inpaint → typeset."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,10 +24,9 @@ ml = [
     "torchvision>=0.15",
     "transformers>=4.49",            # RT-DETR-v2 detector (ogkalu)
     "manga-ocr>=0.1.16",
-    "paddleocr>=3.0",                 # PP-OCRv5_server_det fallback (ONNX via onnxruntime)
+    "paddleocr>=3.0",                 # Korean + Chinese OCR (PP-OCRv5/v6, vertical-capable; ONNX via onnxruntime)
     "onnxruntime>=1.16",
-    "easyocr>=1.7",                   # Korean + Chinese OCR (multi-language input)
-    "opencv-python-headless>=4.8,<5.0",  # cv2 for detection + easyocr (headless: easyocr's dep)
+    "opencv-python-headless>=4.8,<5.0",  # cv2 for detection + paddleocr (headless: no libgl)
     "numpy<2.0",                      # paddlex + simple-lama-inpainting need numpy 1.x
     # simple-lama-inpainting is deliberately NOT listed: its `pillow<10` +
     # `numpy<2` metadata pins are stale and conflict with manga-ocr's

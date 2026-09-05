@@ -10,6 +10,5 @@ transformers>=4.49
 manga-ocr>=0.1.16
 paddleocr>=3.0
 onnxruntime>=1.16
-easyocr>=1.7
 opencv-python-headless>=4.8,<5.0
 numpy<2.0
