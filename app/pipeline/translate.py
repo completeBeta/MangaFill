@@ -24,9 +24,29 @@ SYSTEM_PROMPT = (
     "one per line. No preamble, no explanations, no extra text."
 )
 
+# Korean manhwa/webtoon dialogue has register markers the generic (Japanese-
+# shaped) prompt doesn't capture: banmal (casual/informal speech) vs jondaenmal
+# (formal/honorific speech), plus slang, playful banter, and short emotional
+# outbursts. A literal rendering flattens these into stiff English, so the
+# prompt calls them out explicitly and asks for natural spoken English.
+SYSTEM_PROMPT_KO = (
+    "You are a professional manhwa (Korean webtoon) translator. Translate each "
+    "numbered Korean line to natural, concise spoken English that fits a speech "
+    "bubble. Preserve the register: render banmal (casual/informal speech) as "
+    "relaxed, everyday English and jondaenmal (formal/honorific speech) as more "
+    "polite or formal English; keep slang, playful banter, and short emotional "
+    "outbursts natural and idiomatic, and keep speaker consistency across lines. "
+    "Sound effects (onomatopoeia): give a brief English equivalent or "
+    "transliteration, not dialogue. Output ONLY numbered lines in the exact "
+    "format 'N. <translation>', one per line. No preamble, no explanations, no "
+    "extra text."
+)
+
 
 def _system_prompt(source_lang: str) -> str:
     """Build the translation system prompt for the source language."""
+    if source_lang == "ko":
+        return SYSTEM_PROMPT_KO
     return SYSTEM_PROMPT.format(lang=LANG_NAMES.get(source_lang, "Japanese"))
 
 

@@ -2,6 +2,18 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.23.0] - 2026-09-06
+
+### Fixed
+- **`source_lang=auto` hang on dense manhua pages** — auto-detection probed the `korean` recognizer first, whose language-agnostic detection floods a dense Chinese/Japanese page with hundreds of false-positive boxes and wedges the memory-constrained host. Detection now probes `ch` first (it reads hanzi AND kana, classifying both CJK scripts in one pass) and only falls back to the `korean` recognizer when `ch` finds no CJK — so the korean probe never runs on a Chinese/Japanese page.
+
+### Added
+- **90°-rotation fallback for vertical Korean/Chinese text** — a tall-narrow box read below 0.5 confidence (the textline-orientation classifier missed a vertical line) is now re-read after rotating its crop 90° so the recognizer sees it horizontally. The better read wins, mapped back to the original box. Applied in both the app's `read_boxes_text` and the GPU worker's `ocr_multilingual_blocks` (kept in lockstep).
+- **Korean (manhwa/webtoon) translation prompt** — a dedicated system prompt preserves the banmal (casual) vs jondaenmal (formal/honorific) register, slang, playful banter, and emotional outbursts that the generic Japanese-shaped prompt flattened into stiff English.
+
+### Changed
+- GPU worker bumped to **0.3.1** (mirrors the vertical-text rotation fallback).
+
 ## [0.22.0] - 2026-09-05
 
 ### Added

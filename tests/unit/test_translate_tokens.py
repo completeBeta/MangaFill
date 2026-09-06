@@ -147,6 +147,23 @@ def test_normalize_ascii_maps_smart_punctuation():
     assert translate._normalize_ascii("\u201cHello\u201d") == '"Hello"'
 
 
+def test_system_prompt_korean_uses_manhwa_variant():
+    ko = translate._system_prompt("ko")
+    assert "manhwa" in ko
+    assert "banmal" in ko and "jondaenmal" in ko
+    # the generic (Japanese-shaped) prompt must NOT be used for Korean
+    assert translate._system_prompt("ko") == translate.SYSTEM_PROMPT_KO
+
+
+def test_system_prompt_other_langs_use_generic_prompt():
+    ja = translate._system_prompt("ja")
+    zh = translate._system_prompt("zh")
+    assert "Japanese" in ja
+    assert "Chinese" in zh
+    assert "banmal" not in ja
+    assert ja != translate.SYSTEM_PROMPT_KO
+
+
 def test_normalize_ascii_strips_cjk_and_accents():
     assert translate._normalize_ascii("Pok\u00e9mon \u529b") == "Pokemon"
     assert translate._normalize_ascii("caf\u00e9") == "cafe"

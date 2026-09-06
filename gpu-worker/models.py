@@ -152,16 +152,54 @@ _paddle_pipelines: dict[str, object] = {}
 
 _PADDLE_LANGS = {"ko": "korean", "zh": "ch"}
 
+# A box reading below this confidence with a tall-narrow (vertical) aspect is
+# treated as a missed vertical line and re-read after a 90° rotation. Mirrors
+# the app's `ocr_multilingual.py` — keep them in lockstep.
+_VERTICAL_CONF_FLOOR = 0.5
+
+
+def _reocr_rotated(
+    arr: np.ndarray,
+    x: int, y: int, w: int, h: int,
+    text: str, conf: float, lang: str,
+) -> tuple[str, float]:
+    """Re-read a weakly-recognized vertical column after a 90° rotation.
+
+    PaddleOCR's textline-orientation classifier handles most vertical text but
+    misses stylized/decorative vertical lines, returning garbage at low
+    confidence. Rotating the tall-narrow crop 90° turns the column into a
+    horizontal line the recognizer reads reliably. Returns the better of the
+    two reads (text + confidence). Keeps the ORIGINAL box — callers only need
+    the corrected text, not a new region.
+    """
+    H, W = arr.shape[:2]
+    pad = 8  # give the detector context around a tight text box
+    x0, y0 = max(0, int(x) - pad), max(0, int(y) - pad)
+    x1, y1 = min(W, int(x + w) + pad), min(H, int(y + h) + pad)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return text, conf  # too small to rotate meaningfully
+    crop = arr[y0:y1, x0:x1]
+    # PIL rotates counter-clockwise: a top-to-bottom column becomes a
+    # left-to-right line (correct reading order for CJK vertical text).
+    rot = np.asarray(Image.fromarray(crop).rotate(90, expand=True).convert("RGB"))
+    for rr in _paddle_pipelines[lang].predict(rot):
+        for _p, rtext, rconf in zip(rr["dt_polys"], rr["rec_texts"], rr["rec_scores"]):
+            rtext = (rtext or "").strip()
+            if rtext and float(rconf) > conf:
+                text, conf = rtext, float(rconf)
+    return text, conf
+
 
 def ocr_multilingual_blocks(image: Image.Image, lang: str) -> list[dict]:
     """PaddleOCR (PP-OCRv5/v6) full-pipeline detect+recognize for ko/zh.
 
     Mirrors the app's `app/pipeline/ocr_multilingual.py::read_boxes_text` — keep
     them in lockstep. Reads VERTICAL text natively via the textline-orientation
-    classifier. Returns [{"bbox": [x,y,w,h], "text": str, "confidence": float}]
-    with boxes in ORIGINAL image coords (`dt_polys`, before any orientation
-    rotation). Runs on CPU through the ONNX runtime engine (paddle native CPU
-    inference is broken: PIR/oneDNN).
+    classifier, with a 90°-rotation re-read for weakly-read tall-narrow boxes.
+    Returns [{"bbox": [x,y,w,h], "text": str, "confidence": float}] with boxes in
+    ORIGINAL image coords (`dt_polys`, before any orientation rotation). Runs on
+    CPU through the ONNX runtime engine (paddle native CPU inference is broken:
+    PIR/oneDNN).
     """
     global _paddle_pipelines
     if lang not in _paddle_pipelines:
@@ -187,8 +225,12 @@ def ocr_multilingual_blocks(image: Image.Image, lang: str) -> list[dict]:
             x1, y1 = int(pts[:, 0].max()), int(pts[:, 1].max())
             if x1 <= x0 or y1 <= y0:
                 continue
-            out.append({"bbox": [x0, y0, x1 - x0, y1 - y0], "text": text,
-                        "confidence": float(conf)})
+            w, h = x1 - x0, y1 - y0
+            conf = float(conf)
+            if conf < _VERTICAL_CONF_FLOOR and h > w * 1.5:
+                text, conf = _reocr_rotated(arr, x0, y0, w, h, text, conf, lang)
+            out.append({"bbox": [x0, y0, w, h], "text": text,
+                        "confidence": conf})
     return out
 
 
