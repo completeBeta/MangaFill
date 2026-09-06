@@ -116,6 +116,16 @@
         <div class="settings-section">
           <h3>General</h3>
           <label class="field">
+            <span>Source language</span>
+            <select id="settings-source-lang">
+              <option value="auto">Auto-detect</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+              <option value="zh">Chinese</option>
+            </select>
+          </label>
+          <p class="muted">Auto-detect reads the first page to choose Japanese, Korean, or Chinese. Override it only if detection picks the wrong script.</p>
+          <label class="field">
             <span>Default output mode</span>
             <select id="settings-mode">
               <option value="folder">Folder (leave pages as-is)</option>

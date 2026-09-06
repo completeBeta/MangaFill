@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.23.1] - 2026-09-06
+
+### Added
+- **Source language selector in Settings** — the `source_lang` setting (`auto`/`ja`/`ko`/`zh`, added in v0.20.0 but backend-only) is now exposed in Settings → General, so a user can force a language when auto-detect picks the wrong script.
+
 ## [0.23.0] - 2026-09-06
 
 ### Fixed

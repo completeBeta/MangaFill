@@ -320,6 +320,7 @@ async function loadSettings() {
   // still override it per job).
   $("#upload-mode").value = s.output_mode;
   $("#settings-dry-run").checked = s.dry_run === "true";
+  $("#settings-source-lang").value = s.source_lang || "auto";
 }
 
 // ---------- fonts ----------
@@ -377,6 +378,7 @@ $("#settings-save").addEventListener("click", async () => {
   const payload = {
     output_mode: $("#settings-mode").value,
     dry_run: $("#settings-dry-run").checked ? "true" : "false",
+    source_lang: $("#settings-source-lang").value,
   };
   const status = $("#settings-status");
   status.textContent = "Saving\u2026";
