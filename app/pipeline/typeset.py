@@ -23,20 +23,71 @@ def _text_w(draw: ImageDraw.ImageDraw, text: str, font) -> int:
     return int(bb[2] - bb[0])
 
 
+_SENTENCE_END = ".!?"
+
+
 def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int) -> list[str]:
+    """Word-wrap to `max_w`, preferring natural (punctuation) break points.
+
+    Fills words left-to-right; when the next word would overflow, the line is
+    broken — preferring to end just after a sentence-ending word (`. ! ?`) so a
+    line doesn't split mid-phrase ("WE'LL GROW OLD / TOGETHER."). A balance pass
+    then evens adjacent line widths so a full line isn't followed by a lone
+    dangling word.
+    """
     words = text.split()
+    if not words:
+        return [""]
+
     lines: list[str] = []
-    cur = ""
-    for w in words:
-        trial = (cur + " " + w).strip()
-        if not cur or _text_w(draw, trial, font) <= max_w:
-            cur = trial
-        else:
-            lines.append(cur)
-            cur = w
+    cur = [words[0]]
+    for w in words[1:]:
+        if _text_w(draw, " ".join(cur + [w]), font) <= max_w:
+            cur.append(w)
+            continue
+        # Overflow — break at the last sentence-ending word if there is one
+        # (natural boundary); otherwise break right here.
+        cut = len(cur)
+        for k in range(len(cur) - 1, -1, -1):
+            if cur[k][-1] in _SENTENCE_END:
+                cut = k + 1
+                break
+        lines.append(" ".join(cur[:cut]))
+        cur = cur[cut:] + [w]
     if cur:
-        lines.append(cur)
-    return lines or [""]
+        lines.append(" ".join(cur))
+
+    return _balance_lines(draw, lines, font, max_w)
+
+
+def _balance_lines(draw: ImageDraw.ImageDraw, lines: list[str], font, max_w: int) -> list[str]:
+    """Even out line lengths: move a trailing word from a line to the next when
+    that reduces the width gap between them (and still fits `max_w`).
+
+    The greedy pass above fills each line to capacity, leaving the last line
+    short — a lone "TOGETHER." dangling under a full line. This pass shifts
+    words down to even the raggedness, bounded so it can't oscillate.
+    """
+    for _ in range(len(lines) + 1):
+        moved = False
+        for i in range(len(lines) - 1):
+            a = lines[i].split()
+            if len(a) <= 1:
+                continue
+            aw = _text_w(draw, lines[i], font)
+            bw = _text_w(draw, lines[i + 1], font)
+            candidate = a[-1] + " " + lines[i + 1]
+            if _text_w(draw, candidate, font) > max_w:
+                continue
+            new_aw = _text_w(draw, " ".join(a[:-1]), font)
+            new_bw = _text_w(draw, candidate, font)
+            if abs(new_aw - new_bw) < abs(aw - bw):
+                lines[i] = " ".join(a[:-1])
+                lines[i + 1] = candidate
+                moved = True
+        if not moved:
+            break
+    return lines
 
 
 def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):

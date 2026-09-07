@@ -2,6 +2,15 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.24.0] - 2026-09-07
+
+### Changed
+- **Korean/Chinese dialogue is now lettered per speech box, not per OCR line** — a multi-line speech box comes back from OCR as one box per line, so the ko/zh path now merges vertically-stacked line fragments into a single block and recovers the enclosing speech box (white *or* flat-coloured, via a new colour-aware flood-fill), lettering the whole bubble as one unit. Fixes the "text too small / cramped in dead space" problem.
+- **Sentence-aware line wrapping** — the typesetter now prefers to break lines after sentence-ending punctuation (`. ! ?`) and balances line lengths, so long dialogue no longer splits mid-phrase or dangles a lone word.
+
+### Fixed
+- **CJK ellipsis collapse** — "……" was rendering as a literal six dots ("......"); runs of 3+ dots now collapse to a single "..." in translated text.
+
 ## [0.23.1] - 2026-09-06
 
 ### Added

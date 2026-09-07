@@ -169,6 +169,15 @@ def test_normalize_ascii_strips_cjk_and_accents():
     assert translate._normalize_ascii("caf\u00e9") == "cafe"
 
 
+def test_clean_translation_collapses_cjk_ellipsis():
+    # The CJK ideographic ellipsis "……" maps to "......" via the punctuation
+    # table; collapse any 3+ dot run back to a single "..." so translations
+    # don't carry a literal six-dot ellipsis.
+    assert translate._clean_translation("……") == "..."
+    assert translate._clean_translation("...AWAY. ......") == "...AWAY. ..."
+    assert translate._normalize_ascii("really\u2026") == "really..."  # unchanged single ellipsis
+
+
 def test_clean_translation_normalizes_to_ascii():
     # Smart quotes + em-dash + ellipsis map to renderable ASCII (no tofu boxes).
     assert translate._clean_translation("\u201cI\u2019m fine \u2014 really\u2026\u201d") == "\"I'm fine - really...\""

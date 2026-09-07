@@ -24,7 +24,7 @@ import re
 import numpy as np
 from PIL import Image
 
-from .bubble import find_container, is_free_floating
+from .bubble import find_container, find_speech_box, is_free_floating
 from .detector import detect_containers, find_parent_bubble
 from .ingest import load_image
 from .inpaint import inpaint_text
@@ -135,6 +135,47 @@ def _split_bullet_lines(blocks: list[TextBlock]) -> list[TextBlock]:
                 orientation="horizontal",
             ))
     return out
+
+
+def _merge_stacked_lines(boxes: list) -> list:
+    """Merge vertically-stacked OCR line fragments into single blocks.
+
+    A multi-line speech box comes back from PaddleOCR as one box per line
+    (e.g. a 4-line dialogue returns 4 stacked `(x, y, w, h)` boxes). Typesetting
+    each fragment at its own tight box produces small, cramped lettering and
+    misaligned translations. This groups vertically-adjacent, horizontally-
+    overlapping fragments into one block (joining text top-to-bottom), so the
+    whole bubble is translated and lettered as a unit. Horizontally separated
+    columns (different bubbles) stay distinct.
+    """
+    if len(boxes) <= 1:
+        return boxes
+    ordered = sorted(boxes, key=lambda b: (b[0][1], b[0][0]))
+    blocks: list[dict] = []
+    for (x, y, w, h), text, conf in ordered:
+        placed = False
+        for blk in reversed(blocks):
+            bx, by, bw, bh = blk["bbox"]
+            x_overlap = min(x + w, bx + bw) - max(x, bx)
+            if x_overlap <= 0.3 * min(w, bw):
+                continue  # different column — never merge across a horizontal gap
+            y_gap = y - (by + bh)
+            if y_gap < -0.3 * h or y_gap > 0.6 * max(h, bh):
+                continue  # not vertically adjacent
+            nx = min(bx, x)
+            ny = min(by, y)
+            nx2 = max(bx + bw, x + w)
+            ny2 = max(by + bh, y + h)
+            blk["bbox"] = (nx, ny, nx2 - nx, ny2 - ny)
+            blk["text"] += text
+            blk["conf"] = max(blk["conf"], conf)
+            placed = True
+            break
+        if not placed:
+            blocks.append({"bbox": (x, y, w, h), "text": text, "conf": conf})
+    # Reading order: top-to-bottom, then left-to-right.
+    blocks.sort(key=lambda b: (b["bbox"][1], b["bbox"][0]))
+    return [(b["bbox"], b["text"], b["conf"]) for b in blocks]
 
 
 def _iou(a: tuple, b: tuple) -> float:
@@ -336,6 +377,10 @@ def render_translated_page(
                 boxes = None
         if boxes is None:
             boxes = read_boxes_text(image, lang)
+        # Merge vertically-stacked line fragments (a multi-line speech box is
+        # OCR'd one box per line) into single blocks so the whole bubble is
+        # translated + lettered as a unit instead of line-by-line.
+        boxes = _merge_stacked_lines(boxes)
         blocks = [
             TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
                       orientation=_orientation(w, h))
@@ -407,7 +452,23 @@ def render_translated_page(
     # ---- resolve typeset targets + erase boxes -------------------------------
     targets: list[tuple[TextBlock, tuple]] = []
     erase: list[tuple] = []
-    if bubbles is not None:
+    if lang in ("ko", "zh"):
+        # Webtoon/manhua: no drawn bubbles, and the OCR box is the TIGHT text
+        # region, not the speech box. Recover the enclosing speech box (white or
+        # coloured) so English lettering sizes up into the real box instead of
+        # shrinking into the tight OCR box (the "text too small / dead space"
+        # problem). Falls back to the OCR box when there's no clean container
+        # (narration directly on artwork) — those keep the old sizing.
+        for b in blocks:
+            if b.orientation == "furigana":
+                erase.append(b.bbox)
+                continue
+            if not b.translation:
+                continue
+            region = find_speech_box(image_np, b.bbox) or b.bbox
+            targets.append((b, region))
+            erase.append(b.bbox)
+    elif bubbles is not None:
         for b in blocks:
             if not b.translation:
                 continue

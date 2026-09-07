@@ -1,7 +1,7 @@
 """Unit tests for bubble-aware typesetting helpers (synthetic, no model loading)."""
 import numpy as np
 
-from app.pipeline.bubble import find_container, is_free_floating
+from app.pipeline.bubble import find_container, find_speech_box, is_free_floating
 
 
 def _image(w=400, h=400, bg=128):
@@ -60,3 +60,29 @@ def test_find_container_rejects_oversized():
     gray[50:350, 50:350] = 255
     _draw_glyphs(gray, 130, 140, 40, 60)
     assert find_container(gray, (130, 140, 40, 60)) is None
+
+
+def test_find_container_relaxed_accepts_wide_webtoon_box():
+    # A wide white box (3.5x the text width) is a normal webtoon speech box, not
+    # a leak — the relaxed guards used by the ko/zh path accept it so English
+    # lettering sizes up into the full box instead of the tight OCR region.
+    gray = _image()
+    gray[100:200, 60:200] = 255                         # white box 140x100
+    _draw_glyphs(gray, 80, 110, 40, 40)                 # text 40x40 inside
+    c = find_container(gray, (80, 110, 40, 40), max_width_ratio=4.0, max_height_ratio=3.0)
+    assert c is not None
+    cx, cy, cw, ch = c
+    assert cw >= 100 and ch >= 80                       # captured most of the box
+
+
+def test_find_speech_box_coloured_box():
+    # A flat-coloured (non-white) speech box: find_speech_box samples the fill
+    # colour and flood-fills it, recovering the box where the white-only
+    # find_container would miss.
+    rgb = np.full((300, 300, 3), 120, dtype=np.uint8)   # grey art
+    rgb[100:200, 80:220] = (60, 120, 220)               # blue speech box (RGB)
+    rgb[130:170, 120:180] = (20, 20, 20)                # dark text 60x40 inside
+    c = find_speech_box(rgb, (120, 130, 60, 40))        # tight text bbox
+    assert c is not None
+    cx, cy, cw, ch = c
+    assert cw >= 100 and ch >= 80                       # recovered most of the box

@@ -105,3 +105,89 @@ def is_free_floating(gray: np.ndarray, bbox: tuple, thresh: int = 215, min_white
         return False
     region = gray[y : y + h, x : x + w]
     return float((region >= thresh).mean()) < min_white
+
+
+def find_speech_box(
+    rgb: np.ndarray,
+    bbox: tuple,
+    margin: int = 160,
+    tol: int = 55,
+    min_area_ratio: float = 1.15,
+    max_width_ratio: float = 4.0,
+    max_height_ratio: float = 3.0,
+) -> tuple | None:
+    """Recover a WHITE *or* COLOURED speech box enclosing a tight text box.
+
+    Webtoon/manhua speech boxes aren't always white — they're often a flat
+    colour (blue, purple, …) with a distinct edge against the panel art. This
+    samples the fill colour from a thin ring just outside the text box, flood-
+    fills pixels within `tol` (max per-channel distance) of that colour, and
+    returns the enclosing component, with the same leak guards as
+    `find_container` (area floor, width/height caps, boundary rejection).
+    """
+    x, y, w, h = bbox
+    H, W, _ = rgb.shape
+    if w <= 0 or h <= 0:
+        return None
+
+    # Sample the box fill colour from a thin ring just outside the text box.
+    pad = 6
+    ring: list[np.ndarray] = []
+    for xx in range(max(0, x - pad), min(W, x + w + pad)):
+        if 0 <= y - pad < H:
+            ring.append(rgb[y - pad, xx])
+        if 0 <= y + h + pad < H:
+            ring.append(rgb[y + h + pad, xx])
+    for yy in range(max(0, y - pad), min(H, y + h + pad)):
+        if 0 <= x - pad < W:
+            ring.append(rgb[yy, x - pad])
+        if 0 <= x + w + pad < W:
+            ring.append(rgb[yy, x + w + pad])
+    if not ring:
+        return None
+    fill = np.median(np.asarray(ring, dtype=np.float32), axis=0)
+
+    x0 = max(0, x - margin)
+    x1 = min(W, x + w + margin)
+    y0 = max(0, y - margin)
+    y1 = min(H, y + h + margin)
+    sub = rgb[y0:y1, x0:x1].astype(np.float32)
+    dist = np.abs(sub - fill).max(axis=2)
+    mask = (dist <= tol).astype(np.uint8)
+
+    n, labels, stats, _cen = cv2.connectedComponentsWithStats(mask, 8)
+    text_area = w * h
+
+    # Seed from the same ring points, now in sub-window coords — they sit on the
+    # box fill (not the text glyphs), so their component is the box.
+    for sx, sy in (
+        (x + w // 2, y - pad),
+        (x + w // 2, y + h + pad),
+        (x - pad, y + h // 2),
+        (x + w + pad, y + h // 2),
+    ):
+        lx, ly = sx - x0, sy - y0
+        if not (0 <= lx < mask.shape[1] and 0 <= ly < mask.shape[0]):
+            continue
+        if mask[ly, lx] == 0:
+            continue
+        lab = int(labels[ly, lx])
+        if lab <= 0:
+            continue
+        rx, ry, rw, rh, area = stats[lab]
+        if area < 30:
+            continue
+        if rw * rh < min_area_ratio * text_area:
+            continue
+        if rw > max_width_ratio * w or rh > max_height_ratio * h:
+            continue
+        gx, gy = rx + x0, ry + y0
+        if gx <= 1 or gy <= 1 or gx + rw >= W - 1 or gy + rh >= H - 1:
+            continue
+        # text box must sit mostly inside the container
+        ox = max(0, min(x + w, gx + rw) - max(x, gx))
+        oy = max(0, min(y + h, gy + rh) - max(y, gy))
+        if ox * oy < 0.6 * text_area:
+            continue
+        return (int(gx), int(gy), int(rw), int(rh))
+    return None

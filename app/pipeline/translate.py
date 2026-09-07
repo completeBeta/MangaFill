@@ -116,6 +116,10 @@ def _normalize_ascii(s: str) -> str:
     s = unicodedata.normalize("NFKD", s)
     s = "".join(ch for ch in s if not unicodedata.combining(ch))
     s = "".join(_PUNCT_TO_ASCII.get(ch, ch) for ch in s)
+    # The CJK ideographic ellipsis "……" maps to "......" via the table above;
+    # collapse any run of 3+ dots back to a single "..." so translations don't
+    # carry a literal six-dot ellipsis ("...AWAY. ......").
+    s = re.sub(r"\.{3,}", "...", s)
     s = "".join(ch for ch in s if ord(ch) < 128)
     return s.strip()
 

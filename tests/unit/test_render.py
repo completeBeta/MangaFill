@@ -165,3 +165,25 @@ def test_has_chapter_heading_detects_toc_and_chapter_pages():
     credits = [TextBlock(bbox=(0, 0, 100, 30), text="原作 あずみ圭", orientation="horizontal"),
                TextBlock(bbox=(0, 40, 100, 30), text="漫画 木野コトラ", orientation="horizontal")]
     assert _has_chapter_heading(credits) is False
+
+
+def test_merge_stacked_lines_groups_columns():
+    from app.pipeline.render import _merge_stacked_lines
+
+    boxes = [
+        ((100, 100, 200, 40), "line1", 0.9),
+        ((100, 145, 200, 40), "line2", 0.9),
+        ((100, 190, 200, 40), "line3", 0.9),
+        ((400, 100, 200, 40), "other", 0.9),   # separate column (no x-overlap)
+    ]
+    merged = _merge_stacked_lines(boxes)
+    assert len(merged) == 2
+    assert merged[0][1] == "line1line2line3"   # stacked lines joined top-to-bottom
+    assert merged[1][1] == "other"             # other column stays separate
+
+
+def test_merge_stacked_lines_keeps_single():
+    from app.pipeline.render import _merge_stacked_lines
+
+    boxes = [((100, 100, 200, 40), "solo", 0.9)]
+    assert _merge_stacked_lines(boxes) == boxes
