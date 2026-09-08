@@ -2,6 +2,12 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.24.3] - 2026-09-08
+
+### Fixed
+- **Over-shrunk text in wide bubbles** — the clean-size preference required *zero* single-word lines, so a long caption whose last line is a single word was shrunk far more than needed, leaving a large bubble half-empty. It now allows a single lone-word (orphan) last line, so wide bubbles keep a readable size.
+- **Split narration blocks** — a multi-line narration whose OCR line boxes overlap by ~20–30% (box padding) was left as two/three separate blocks (e.g. "Even though that's what" + "the profile says…" floating apart), because the merge rejected overlap above 0.3×box-height — right at the boundary of normal OCR padding. The overlap tolerance is now 0.6×height, so adjacent fragments merge into one coherent block.
+
 ## [0.24.2] - 2026-09-08
 
 ### Fixed

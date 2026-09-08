@@ -160,7 +160,12 @@ def _merge_stacked_lines(boxes: list) -> list:
             if x_overlap <= 0.3 * min(w, bw):
                 continue  # different column — never merge across a horizontal gap
             y_gap = y - (by + bh)
-            if y_gap < -0.3 * h or y_gap > 0.6 * max(h, bh):
+            # Reject only when the new box overlaps the previous by more than
+            # ~60% of its height (a nested/duplicate detection) or sits well
+            # below it (a different bubble). Adjacent OCR line fragments often
+            # overlap by 20-30% of their height (box padding), so -0.3*h was
+            # too tight and left a multi-line narration split across blocks.
+            if y_gap < -0.6 * h or y_gap > 0.6 * max(h, bh):
                 continue  # not vertically adjacent
             nx = min(bx, x)
             ny = min(by, y)

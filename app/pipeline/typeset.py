@@ -113,9 +113,9 @@ def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):
         if best is None:
             best = (size, lines, font)
         singles = sum(1 for ln in lines if len(ln.split()) == 1)
-        if singles == 0:
+        if singles <= 1:
             best_clean = (size, lines, font)
-            break  # largest clean size (scanning high -> low)
+            break  # largest size with at most one lone-word line (scanning high -> low)
     return best_clean or best
 
 

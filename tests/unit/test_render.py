@@ -224,3 +224,19 @@ def test_merge_stacked_lines_keeps_single():
 
     boxes = [((100, 100, 200, 40), "solo", 0.9)]
     assert _merge_stacked_lines(boxes) == boxes
+
+
+def test_merge_stacked_lines_merges_overlapping_fragments():
+    from app.pipeline.render import _merge_stacked_lines
+
+    # Adjacent OCR line fragments can overlap by ~20-30% of their height (box
+    # padding) — a multi-line narration must still merge into one block, not
+    # three separate "floating" translations.
+    boxes = [
+        ((622, 463, 165, 69), "资料上虽", 1.0),
+        ((616, 512, 163, 66), "然是怎么", 1.0),
+        ((611, 561, 163, 62), "写的……", 0.98),
+    ]
+    merged = _merge_stacked_lines(boxes)
+    assert len(merged) == 1
+    assert merged[0][1] == "资料上虽然是怎么写的……"
