@@ -23,101 +23,100 @@ def _text_w(draw: ImageDraw.ImageDraw, text: str, font) -> int:
     return int(bb[2] - bb[0])
 
 
-_SENTENCE_END = ".!?"
-
-
 def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int) -> list[str]:
-    """Word-wrap to `max_w`, preferring natural (punctuation) break points.
+    """Word-wrap to `max_w` via a minimum-raggedness dynamic program.
 
-    Fills words left-to-right; when the next word would overflow, the line is
-    broken — preferring to end just after a sentence-ending word (`. ! ?`) so a
-    line doesn't split mid-phrase ("WE'LL GROW OLD / TOGETHER."). A balance pass
-    then evens adjacent line widths so a full line isn't followed by a lone
-    dangling word.
+    The old greedy fill-left + balance pass left a short ragged last line, and
+    in narrow bubbles broke one word per line ("I / WAITED / IN LINE / …").
+    This finds the break sequence that minimises total squared slack (lines come
+    out close to `max_w` and roughly even) with a small penalty on a lone
+    trailing word so it pairs up with the line above when it fits. O(n²) in the
+    word count — trivial for a speech bubble.
     """
     words = text.split()
     if not words:
         return [""]
+    n = len(words)
+    if n == 1:
+        return words
+
+    # Exact width of every candidate line words[i:j] (stroke included, via the
+    # same _text_w the greedy path used, so monkeypatched tests stay valid).
+    wd = [[0] * (n + 1) for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1, n + 1):
+            wd[i][j] = _text_w(draw, " ".join(words[i:j]), font)
+
+    inf = float("inf")
+    cost = [inf] * (n + 1)
+    brk = [0] * (n + 1)
+    cost[n] = 0.0
+    for i in range(n - 1, -1, -1):
+        for j in range(i + 1, n + 1):
+            single = (j - i == 1)
+            if wd[i][j] > max_w and not single:
+                break  # multi-word line too wide; a wider j only grows
+            if wd[i][j] > max_w:
+                # A lone word wider than the box is forced onto its own line —
+                # heavy penalty so the DP avoids it, but it keeps every position
+                # breakable (never an infinite reconstruction loop).
+                bad = 2.0
+            elif j == n:
+                # Last line: penalise a lone trailing word so it joins the line
+                # above when it fits (0.6 > the max per-line slack² of 1.0).
+                bad = 0.6 if single else 0.0
+            else:
+                slack = (max_w - wd[i][j]) / max_w
+                bad = slack * slack
+            c = cost[j] + bad
+            if c < cost[i]:
+                cost[i] = c
+                brk[i] = j
 
     lines: list[str] = []
-    cur = [words[0]]
-    for w in words[1:]:
-        if _text_w(draw, " ".join(cur + [w]), font) <= max_w:
-            cur.append(w)
-            continue
-        # Overflow — break at the last sentence-ending word if there is one
-        # (natural boundary); otherwise break right here.
-        cut = len(cur)
-        for k in range(len(cur) - 1, -1, -1):
-            if cur[k][-1] in _SENTENCE_END:
-                cut = k + 1
-                break
-        lines.append(" ".join(cur[:cut]))
-        cur = cur[cut:] + [w]
-    if cur:
-        lines.append(" ".join(cur))
-
-    return _balance_lines(draw, lines, font, max_w)
-
-
-def _balance_lines(draw: ImageDraw.ImageDraw, lines: list[str], font, max_w: int) -> list[str]:
-    """Even out line lengths: move a trailing word from a line to the next when
-    that reduces the width gap between them (and still fits `max_w`).
-
-    The greedy pass above fills each line to capacity, leaving the last line
-    short — a lone "TOGETHER." dangling under a full line. This pass shifts
-    words down to even the raggedness, bounded so it can't oscillate.
-    """
-    for _ in range(len(lines) + 1):
-        moved = False
-        for i in range(len(lines) - 1):
-            a = lines[i].split()
-            if len(a) <= 1:
-                continue
-            aw = _text_w(draw, lines[i], font)
-            bw = _text_w(draw, lines[i + 1], font)
-            candidate = a[-1] + " " + lines[i + 1]
-            if _text_w(draw, candidate, font) > max_w:
-                continue
-            new_aw = _text_w(draw, " ".join(a[:-1]), font)
-            new_bw = _text_w(draw, candidate, font)
-            if abs(new_aw - new_bw) < abs(aw - bw):
-                lines[i] = " ".join(a[:-1])
-                lines[i + 1] = candidate
-                moved = True
-        if not moved:
-            break
+    i = 0
+    while i < n:
+        j = brk[i]
+        if j <= i:  # safety net — every position is breakable, so this won't fire
+            j = i + 1
+        lines.append(" ".join(words[i:j]))
+        i = j
     return lines
 
 
 def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):
-    """Largest font size (capped at `max_font`) whose wrapped lines fit the box.
+    """Best font size for `text` in the box: the largest size whose wrapped lines
+    fit *and* carry no single-word line, else the largest that fits.
 
-    Uses multiline_textbbox so the measurement matches what PIL actually draws
-    (a getmetrics() estimate drifted and caused overlap), measuring *with* the
-    white-outline stroke so the lettering + stroke stays inside the box (the
-    "text spilling over its box" bug). Returns None if even the 8px floor
-    overflows.
+    The old binary search maximised size alone, so in a narrow bubble it picked a
+    size where each word lands on its own line ("I / WAITED / IN LINE / …").
+    A single-word line is the visual marker that the font is too big for the
+    width, so we prefer the largest size with none of them (failing open to the
+    largest fitting size when a lone word can't pair at any size — e.g. one very
+    long word, or a genuinely narrow box). Linear scan over the small 8..max_font
+    range is cheaper than the old binary search's correctness anyway.
     """
-    lo, hi = 8, max_font
-    best = None
     probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        font = ImageFont.truetype(font_path, mid)
-        sw = max(1, mid // 8)
+    best: tuple | None = None        # (size, lines, font) — largest fitting size
+    best_clean: tuple | None = None  # largest fitting size with no single-word line
+    for size in range(max_font, 7, -1):
+        font = ImageFont.truetype(font_path, size)
+        sw = max(1, size // 8)
         lines = _wrap(probe, text, font, max_w)
         joined = "\n".join(lines)
         bb = probe.multiline_textbbox(
             (0, 0), joined, font=font, spacing=2, align="center", stroke_width=sw
         )
         tw, th = bb[2] - bb[0], bb[3] - bb[1]
-        if tw <= max_w and th <= max_h:
-            best = (mid, lines, font)
-            lo = mid + 1
-        else:
-            hi = mid - 1
-    return best
+        if tw > max_w or th > max_h:
+            continue
+        if best is None:
+            best = (size, lines, font)
+        singles = sum(1 for ln in lines if len(ln.split()) == 1)
+        if singles == 0:
+            best_clean = (size, lines, font)
+            break  # largest clean size (scanning high -> low)
+    return best_clean or best
 
 
 def _draw_box(draw: ImageDraw.ImageDraw, bbox: tuple, text: str, font_path: str | None, max_font: int):

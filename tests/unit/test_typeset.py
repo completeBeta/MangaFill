@@ -78,3 +78,12 @@ def test_wrap_no_break_without_overflow(monkeypatch):
 
     monkeypatch.setattr(t, "_text_w", lambda draw, text, font: len(text))
     assert t._wrap(None, "SHORT LINE", None, 50) == ["SHORT LINE"]
+
+
+def test_wrap_word_wider_than_box_does_not_hang(monkeypatch):
+    import app.pipeline.typeset as t
+
+    monkeypatch.setattr(t, "_text_w", lambda draw, text, font: len(text))
+    # "BBBBBBBB" (8 chars) exceeds max_w=5; the DP must still place it alone
+    # (and not loop forever on an unbreakable position).
+    assert t._wrap(None, "AA BBBBBBBB CC", None, 5) == ["AA", "BBBBBBBB", "CC"]

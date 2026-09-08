@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.24.2] - 2026-09-08
+
+### Fixed
+- **Chopped single-word line breaks in narrow bubbles** — the typesetter sized text to the *largest* font that fit the box, which in a narrow bubble left each word on its own line ("I / WAITED / IN LINE / FOR / …"). The wrapper is now a minimum-raggedness dynamic program (balanced lines, no dangling lone word), and the sizer prefers the largest size whose wrapped lines carry *no* single-word line — so a tall-narrow bubble now reads "I WAITED / IN LINE FOR / TWO DAYS / AND NIGHTS" instead of eight one-word lines.
+
 ## [0.24.1] - 2026-09-08
 
 ### Fixed
