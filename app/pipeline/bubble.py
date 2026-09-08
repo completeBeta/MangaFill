@@ -184,6 +184,12 @@ def find_speech_box(
         gx, gy = rx + x0, ry + y0
         if gx <= 1 or gy <= 1 or gx + rw >= W - 1 or gy + rh >= H - 1:
             continue
+        # The recovered box must be at least as large as the text it encloses.
+        # A flood-fill that stops short (e.g. truncated at a panel edge or an
+        # anti-aliased outline) can return a box *shorter* than the text, which
+        # then lettering overflows. Reject those and fall back to expansion.
+        if rw < w or rh < h:
+            continue
         # text box must sit mostly inside the container
         ox = max(0, min(x + w, gx + rw) - max(x, gx))
         oy = max(0, min(y + h, gy + rh) - max(y, gy))

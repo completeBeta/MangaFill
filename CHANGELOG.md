@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.24.4] - 2026-09-08
+
+### Fixed
+- **Overflow from under-recovered speech boxes** — the colour flood-fill could stop short (truncated at a panel edge / anti-aliased outline) and return a box *shorter* than the text it was supposed to contain, so lettering sized to that box overflowed the real bubble. `find_speech_box` now rejects any recovered box smaller than the text in either dimension and falls back to OCR-box expansion.
+
 ## [0.24.3] - 2026-09-08
 
 ### Fixed
