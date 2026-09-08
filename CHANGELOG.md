@@ -2,6 +2,15 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.24.1] - 2026-09-08
+
+### Fixed
+- **Korean/Chinese text overflowing its speech box** — the ko/zh path lettered into the full recovered bubble bounding box with no inset, so English was sized to the box *including* the outline and starburst spikes and spilled over the drawn bubble. The recovered box is now inset (15% width / 12% height) to its inscribed rectangle — the same inset the Japanese path already applied.
+- **Text too small when no speech box was recovered** — when the colour-aware flood-fill leaked into the white page background (thin/anti-aliased bubble outlines) and returned no box, the typesetter fell back to the tight OCR box and lettered tiny. It now expands the OCR box a modest fraction toward the enclosing bubble instead.
+
+### Changed
+- **Translation prompt keeps a character's name separate from their line** — the model was fusing the speaker's name with the following contraction ("Meng Erfei-you've…"). The prompt now explicitly instructs a comma-and-space separation ("Meng Erfei, you've…"), fixing the awkward hyphenated name breaks.
+
 ## [0.24.0] - 2026-09-07
 
 ### Changed

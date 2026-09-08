@@ -250,6 +250,37 @@ def _orientation(w: int, h: int) -> str:
     return "horizontal"
 
 
+def _inset_box(bbox: tuple, wx: float = 0.15, hy: float = 0.12) -> tuple:
+    """Inset a bubble/box bbox to approximate its inscribed rectangle.
+
+    Oval and spiked/starburst bubbles are narrower at the edges, so fitting text
+    to the full bounding box spills over the outline (the "text overflowing the
+    bubble" bug). Shrink by a fraction of each dimension — the same fraction the
+    JA parent-bubble path uses — so lettering stays inside the drawn outline.
+    Returns the original box if the inset would collapse it to nothing.
+    """
+    x, y, w, h = bbox
+    ix, iy = int(w * wx), int(h * hy)
+    nw, nh = w - 2 * ix, h - 2 * iy
+    if nw < 8 or nh < 8:
+        return bbox
+    return (x + ix, y + iy, nw, nh)
+
+
+def _expand_box(bbox: tuple, wx: float = 0.25, hy: float = 0.20) -> tuple:
+    """Expand a tight OCR text bbox toward the enclosing speech box.
+
+    When no clean speech box can be recovered (the flood-fill leaked into the
+    white page background through a thin outline), the raw OCR box is much
+    smaller than the real bubble and lettering comes out tiny. Grow it a modest
+    fraction instead — a middle ground between the cramped OCR box and an
+    unbounded guess that would spill into the artwork.
+    """
+    x, y, w, h = bbox
+    ex, ey = int(w * wx), int(h * hy)
+    return (max(0, x - ex), max(0, y - ey), w + 2 * ex, h + 2 * ey)
+
+
 def _build_blocks_from_det(det: dict, image_np: np.ndarray) -> list[TextBlock]:
     """OCR the detector's `text_bubble` + `text_free` regions into TextBlocks."""
     blocks: list[TextBlock] = []
@@ -465,7 +496,8 @@ def render_translated_page(
                 continue
             if not b.translation:
                 continue
-            region = find_speech_box(image_np, b.bbox) or b.bbox
+            sb = find_speech_box(image_np, b.bbox)
+            region = _inset_box(sb) if sb else _expand_box(b.bbox)
             targets.append((b, region))
             erase.append(b.bbox)
     elif bubbles is not None:
@@ -483,9 +515,7 @@ def render_translated_page(
                     # Inset the bubble's bounding box to approximate its inscribed
                     # rectangle — ovals/spiked bubbles are narrower at the edges, so
                     # fitting text to the full bbox spills over the outline.
-                    x, y, w, h = region
-                    ix, iy = int(w * 0.15), int(h * 0.12)
-                    region = (x + ix, y + iy, w - 2 * ix, h - 2 * iy)
+                    region = _inset_box(region)
                 else:
                     # Free text / caption: no bubble edge to avoid — use its own box.
                     region = b.bbox

@@ -24,6 +24,43 @@ def test_orientation_classifies_by_shape():
     assert _orientation(10, 40) == "furigana"      # narrow ruby column
 
 
+def test_inset_box_shrinks_edges():
+    from app.pipeline.render import _inset_box
+
+    bbox = (100, 100, 200, 200)
+    ins = _inset_box(bbox)
+    # 15% width / 12% height inset -> narrower + shorter, still centered.
+    assert ins[0] > bbox[0] and ins[1] > bbox[1]
+    assert ins[2] < bbox[2] and ins[3] < bbox[3]
+    assert ins[2] == 200 - 2 * int(200 * 0.15)
+    assert ins[3] == 200 - 2 * int(200 * 0.12)
+
+
+def test_inset_box_does_not_collapse_tiny_box():
+    from app.pipeline.render import _inset_box
+
+    tiny = (0, 0, 8, 8)  # 15%/12% inset drops a dimension below the 8px floor
+    assert _inset_box(tiny) == tiny
+
+
+def test_expand_box_grows_around_center():
+    from app.pipeline.render import _expand_box
+
+    bbox = (100, 100, 100, 100)
+    ex = _expand_box(bbox)
+    assert ex[0] < bbox[0] and ex[1] < bbox[1]
+    assert ex[2] > bbox[2] and ex[3] > bbox[3]
+    assert ex[2] == 100 + 2 * int(100 * 0.25)
+
+
+def test_expand_box_clamps_to_origin():
+    from app.pipeline.render import _expand_box
+
+    bbox = (0, 0, 100, 100)
+    ex = _expand_box(bbox)
+    assert ex[0] >= 0 and ex[1] >= 0
+
+
 def test_box_containment_nested():
     # 20x20 box fully inside a 100x100 box: containment is 1.0.
     assert _box_containment((0, 0, 100, 100), (10, 10, 20, 20)) == 1.0
