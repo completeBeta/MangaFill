@@ -61,6 +61,37 @@ def test_expand_box_clamps_to_origin():
     assert ex[0] >= 0 and ex[1] >= 0
 
 
+def test_caption_region_widens_and_tallens_wide_caption():
+    from app.pipeline.render import _caption_region
+
+    # A 935x56 footnote: the old _expand_box gave a 1401x78 region that crushed
+    # the font vertically. The caption region must be wide AND tall enough for
+    # ~3 wrapped lines, and stay on-page.
+    x, y, w, h = _caption_region((173, 1814, 935, 56), 1600, 2262)
+    assert w >= 935            # at least the caption's own width
+    assert h >= int(2262 * 0.06)  # page-proportional height floor (~3 lines)
+    assert x >= 0 and x + w <= 1600  # on-page
+
+
+def test_caption_region_centers_on_vertical_caption():
+    from app.pipeline.render import _caption_region
+
+    # A tall vertical caption (问世间情为何物, 72x461) must get a WIDE strip (English
+    # is horizontal) roughly centered on the original text's vertical position.
+    x, y, w, h = _caption_region((754, 376, 72, 461), 1600, 2262)
+    assert w >= int(1600 * 0.6)   # wide enough for horizontal English
+    # strip's vertical centre is near the original text's centre
+    assert abs((y + h // 2) - (376 + 461 // 2)) < h // 2 + 1
+
+
+def test_caption_region_clamps_to_page_edge():
+    from app.pipeline.render import _caption_region
+
+    # A caption near the right edge must not spill off-page.
+    x, y, w, h = _caption_region((1500, 100, 200, 40), 1600, 2262)
+    assert x + w <= 1600
+
+
 def test_box_containment_nested():
     # 20x20 box fully inside a 100x100 box: containment is 1.0.
     assert _box_containment((0, 0, 100, 100), (10, 10, 20, 20)) == 1.0
@@ -140,6 +171,19 @@ def test_drop_non_japanese_filters_english():
     assert mixed in kept    # has kana -> translate
     assert en not in kept   # already-English -> leave untouched
     assert empty not in kept
+
+
+def test_drop_corner_watermarks_skips_publisher_mark():
+    from app.pipeline.render import _drop_corner_watermarks
+    from app.pipeline.types import TextBlock
+
+    # 腾讯动漫 in the bottom-right corner is a publisher watermark — skip it. A
+    # footnote higher up the page is real text — keep it.
+    wm = TextBlock(bbox=(1390, 2185, 203, 61), text="腾讯动漫", orientation="horizontal")
+    footnote = TextBlock(bbox=(173, 1814, 935, 56), text="*注", orientation="horizontal")
+    kept = _drop_corner_watermarks([wm, footnote], 1600, 2262)
+    assert wm not in kept
+    assert footnote in kept
 
 
 def test_dedup_blocks_drops_nested_duplicates():

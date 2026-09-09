@@ -127,3 +127,34 @@ def test_reocr_rotated_skips_when_crop_too_small(monkeypatch):
     arr = np.zeros((5, 5, 3), dtype=np.uint8)
     text, conf = om._reocr_rotated(arr, 0, 0, 3, 4, "orig", 0.1, "zh")
     assert (text, conf) == ("orig", 0.1)
+
+
+def test_is_noise_box_drops_foliage_sized_boxes():
+    # Leaf clusters read as single hanzi (业 39x42, 义 50x51) are noise; real
+    # single-char SFX (啊 63x58) has one dimension above the floor.
+    assert om.is_noise_box(39, 42) is True
+    assert om.is_noise_box(50, 51) is True
+    assert om.is_noise_box(25, 28) is True
+    assert om.is_noise_box(63, 58) is False   # 啊 SFX
+    assert om.is_noise_box(160, 146) is False  # 啪 SFX
+    assert om.is_noise_box(220, 127) is False  # 主人 dialogue
+
+
+def test_read_boxes_text_drops_noise_boxes(monkeypatch):
+    # A foliage-sized detection must never reach the block-building stage.
+    class _FakePipeline:
+        def predict(self, _arr):
+            return [{
+                "dt_polys": [
+                    [[0, 0], [0, 200], [60, 200], [60, 0]],   # real vertical text
+                    [[900, 900], [900, 940], [940, 940], [940, 900]],  # leaf noise
+                ],
+                "rec_texts": ["问世间情为何物", "义"],
+                "rec_scores": [0.99, 0.86],
+            }]
+
+    monkeypatch.setattr(om, "_pipeline", lambda lang: _FakePipeline())
+    monkeypatch.setattr(om, "_reocr_rotated", lambda *a, **k: ("x", 0.5))
+    img = Image.new("RGB", (1000, 1000))
+    boxes = om.read_boxes_text(img, "zh")
+    assert [t for _b, t, _c in boxes] == ["问世间情为何物"]

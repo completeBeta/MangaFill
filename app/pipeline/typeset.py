@@ -187,5 +187,11 @@ def typeset_page(
         if not b.translation:
             continue
         region = regions.get(id(b), b.bbox) if regions else b.bbox
-        _draw_box(draw, region, b.translation, fp, cap)
+        bcap = cap
+        if b.orientation == "horizontal":
+            # Horizontal captions/stat lines letter at a size tied to their own
+            # text height, not the full-page cap — a short footnote should not
+            # blow up to the max size just because the caption region is wide.
+            bcap = min(cap, max(14, int(b.bbox[3] * 0.8)))
+        _draw_box(draw, region, b.translation, fp, bcap)
     return out

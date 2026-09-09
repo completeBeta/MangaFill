@@ -30,7 +30,7 @@ from .ingest import load_image
 from .inpaint import inpaint_text
 from .language import has_cjk_or_hangul
 from .ocr import ocr_crop
-from .ocr_multilingual import detect_language, drop_all_pipelines, read_boxes_text
+from .ocr_multilingual import detect_language, drop_all_pipelines, read_boxes_text, is_noise_box
 from .pipeline import process_page
 from .remote import remote_detect_ocr, remote_inpaint, remote_ocr_multilingual
 from .translate import translate_page
@@ -68,6 +68,26 @@ def _drop_non_japanese(blocks: list[TextBlock]) -> list[TextBlock]:
     detector.
     """
     return [b for b in blocks if b.text and _has_japanese(b.text)]
+
+
+def _drop_corner_watermarks(blocks: list[TextBlock], page_w: int, page_h: int) -> list[TextBlock]:
+    """Skip publisher/scan watermarks sitting in the extreme bottom corners.
+
+    The `_has_japanese` gate already drops ASCII watermarks ("MangaStone.com"),
+    but a Chinese manhua's publisher mark (腾讯动漫, 哔哩哔哩漫画) is hanzi and would
+    otherwise be "translated" into nonsense ("Tencent Comics") over the logo. A
+    publisher mark sits in the bottom ~6% of the page and hugs either edge; real
+    story text (footnotes, captions) sits higher and more centrally.
+    """
+    if page_h <= 0:
+        return blocks
+    return [
+        b for b in blocks
+        if not (
+            b.bbox[1] > 0.94 * page_h
+            and (b.bbox[0] < 0.25 * page_w or b.bbox[0] + b.bbox[2] > 0.75 * page_w)
+        )
+    ]
 
 
 def _dedup_blocks(blocks: list[TextBlock]) -> list[TextBlock]:
@@ -286,6 +306,23 @@ def _expand_box(bbox: tuple, wx: float = 0.25, hy: float = 0.20) -> tuple:
     return (max(0, x - ex), max(0, y - ey), w + 2 * ex, h + 2 * ey)
 
 
+def _caption_region(bbox: tuple, page_w: int, page_h: int) -> tuple:
+    """Region for free-floating text that has no enclosing speech box.
+
+    `_expand_box` grows by 25%/20%, so a wide footnote gets a short-wide region
+    and a tall vertical caption (问世间情为何物) keeps a tall-narrow one — in both
+    cases `_fit` crushes the English font because English is HORIZONTAL and needs
+    width, not the source text's box shape. Letter free text across a generous
+    horizontal strip (room for ~3 wrapped lines) centered on the original text.
+    """
+    x, y, w, h = bbox
+    nw = max(w, int(page_w * 0.6))
+    nx = max(0, min(x, page_w - nw))  # keep it on-page
+    nh = max(int(h * 1.5), int(page_h * 0.06))
+    ny = max(0, y + h // 2 - nh // 2)  # center the strip on the source text
+    return (nx, ny, nw, nh)
+
+
 def _build_blocks_from_det(det: dict, image_np: np.ndarray) -> list[TextBlock]:
     """OCR the detector's `text_bubble` + `text_free` regions into TextBlocks."""
     blocks: list[TextBlock] = []
@@ -421,7 +458,7 @@ def render_translated_page(
             TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
                       orientation=_orientation(w, h))
             for (x, y, w, h), text, conf in boxes
-            if text and _has_japanese(text)
+            if text and _has_japanese(text) and not is_noise_box(w, h)
         ]
         bubbles = []
     elif gpu_worker_url:
@@ -462,7 +499,14 @@ def render_translated_page(
     # Then skip large stylized titles/logos (mis-OCR'd) and split bulleted stat
     # columns into per-line blocks so each stat typesets on its own line.
     blocks = _split_bullet_lines(
-        _drop_titles(_dedup_blocks(_drop_non_japanese(blocks)), image.height)
+        _drop_titles(
+            _dedup_blocks(
+                _drop_corner_watermarks(
+                    _drop_non_japanese(blocks), image.width, image.height
+                )
+            ),
+            image.height,
+        )
     )
 
     # ---- translate (cloud LLM) ----------------------------------------------
@@ -502,7 +546,14 @@ def render_translated_page(
             if not b.translation:
                 continue
             sb = find_speech_box(image_np, b.bbox)
-            region = _inset_box(sb) if sb else _expand_box(b.bbox)
+            if sb:
+                region = _inset_box(sb)
+            else:
+                # Free-floating text on artwork (vertical caption or horizontal
+                # footnote) with no enclosing box: English is always horizontal,
+                # so letter it across a generous strip instead of fitting it to
+                # the source text's (tall-narrow or short-wide) box shape.
+                region = _caption_region(b.bbox, image.width, image.height)
             targets.append((b, region))
             erase.append(b.bbox)
     elif bubbles is not None:

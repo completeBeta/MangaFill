@@ -35,6 +35,20 @@ _PADDLE_LANGS = {"ko": "korean", "zh": "ch"}
 # treated as a missed vertical line and re-read after a 90° rotation.
 _VERTICAL_CONF_FLOOR = 0.5
 
+# A box smaller than this in BOTH dimensions is foliage/texture false-positive
+# noise, not text. On dense artwork (tree canopies, grass, clouds) the detector
+# fires on leaf clusters and the recognizer reads them as a single hanzi at
+# moderate-high confidence (e.g. 业 at 0.707, 义 at 0.860 on a splash page), which
+# then gets "translated" into stray words like KARMA / RIGHTEOUSNESS over the art.
+# Real text — even single-character SFX (啊 63x58, 啪 160x146) — has at least one
+# dimension above this. Tuned for ~1600px manhua/webtoon pages.
+_MIN_TEXT_DIM = 55
+
+
+def is_noise_box(w: int, h: int) -> bool:
+    """True if a detected box is too small to be real text (foliage/texture)."""
+    return w < _MIN_TEXT_DIM and h < _MIN_TEXT_DIM
+
 _pipelines: dict[str, object] = {}
 
 
@@ -93,6 +107,8 @@ def read_boxes_text(image: Image.Image, lang: str) -> list[tuple]:
             x, y, w, h = _polys_to_xywh(poly)
             if w <= 0 or h <= 0:
                 continue
+            if is_noise_box(w, h):
+                continue  # foliage/texture false positive (tiny leaf cluster)
             conf = float(conf)
             if conf < _VERTICAL_CONF_FLOOR and h > w * 1.5:
                 text, conf = _reocr_rotated(arr, x, y, w, h, text, conf, lang)

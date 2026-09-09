@@ -2,6 +2,13 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.24.5] - 2026-09-09
+
+### Fixed
+- **Foliage/texture misread as text** — dense artwork (tree canopies, grass, clouds) produced tiny false-positive detections that PaddleOCR read as single hanzi at moderate confidence (e.g. `业`→"KARMA", `义`→"RIGHTEOUSNESS" rendered over the art). A minimum-size floor now drops any detected box smaller than ~55px in *both* dimensions (real text — even single-char SFX like `啊` — has one dimension above it), applied to both the local OCR path and the GPU-worker path.
+- **Publisher watermarks "translated"** — a Chinese manhua's corner watermark (`腾讯动漫`) is hanzi, so the ASCII-watermark skip missed it and it was lettered as "Tencent Comics" over the logo. Text sitting in the bottom ~6% of the page and hugging either edge is now skipped like other watermarks.
+- **Free-floating captions too small** — a wide footnote or a tall vertical caption (问世间情为何物) with no enclosing speech box was fitted to the *source text's* box shape (short-wide / tall-narrow), so English — which is horizontal — was crushed to a tiny font. Free-floating text is now lettered across a generous horizontal strip centered on the original, and horizontal text is capped at ~0.8× its own height so a short footnote no longer blows up to the full-page cap.
+
 ## [0.24.4] - 2026-09-08
 
 ### Fixed
