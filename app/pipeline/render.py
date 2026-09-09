@@ -309,14 +309,14 @@ def _expand_box(bbox: tuple, wx: float = 0.25, hy: float = 0.20) -> tuple:
 def _caption_region(bbox: tuple, page_w: int, page_h: int) -> tuple:
     """Region for free-floating text that has no enclosing speech box.
 
-    `_expand_box` grows by 25%/20%, so a wide footnote gets a short-wide region
-    and a tall vertical caption (问世间情为何物) keeps a tall-narrow one — in both
-    cases `_fit` crushes the English font because English is HORIZONTAL and needs
-    width, not the source text's box shape. Letter free text across a generous
-    horizontal strip (room for ~3 wrapped lines) centered on the original text.
+    English is horizontal, so a *vertical* caption (问世间情为何物) needs width, and
+    a short-wide footnote needs height for its wrapped lines — but small on-screen
+    labels / single characters must NOT be widened across the page (that spilled
+    UI text into neighbouring panels). Only tall-narrow text gets the wide strip;
+    everything else keeps its own width and just gains vertical room.
     """
     x, y, w, h = bbox
-    nw = max(w, int(page_w * 0.6))
+    nw = int(page_w * 0.6) if h > w * 1.5 else w
     nx = max(0, min(x, page_w - nw))  # keep it on-page
     nh = max(int(h * 1.5), int(page_h * 0.06))
     ny = max(0, y + h // 2 - nh // 2)  # center the strip on the source text
@@ -458,7 +458,7 @@ def render_translated_page(
             TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
                       orientation=_orientation(w, h))
             for (x, y, w, h), text, conf in boxes
-            if text and _has_japanese(text) and not is_noise_box(w, h)
+            if text and _has_japanese(text) and not is_noise_box(w, h, conf)
         ]
         bubbles = []
     elif gpu_worker_url:

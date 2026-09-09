@@ -129,32 +129,39 @@ def test_reocr_rotated_skips_when_crop_too_small(monkeypatch):
     assert (text, conf) == ("orig", 0.1)
 
 
-def test_is_noise_box_drops_foliage_sized_boxes():
-    # Leaf clusters read as single hanzi (业 39x42, 义 50x51) are noise; real
-    # single-char SFX (啊 63x58) has one dimension above the floor.
-    assert om.is_noise_box(39, 42) is True
-    assert om.is_noise_box(50, 51) is True
-    assert om.is_noise_box(25, 28) is True
-    assert om.is_noise_box(63, 58) is False   # 啊 SFX
-    assert om.is_noise_box(160, 146) is False  # 啪 SFX
-    assert om.is_noise_box(220, 127) is False  # 主人 dialogue
+def test_is_noise_box_drops_small_low_conf_keeps_small_high_conf():
+    # Foliage reads as single hanzi at LOW-moderate confidence -> noise.
+    assert om.is_noise_box(39, 42, 0.707) is True   # 业 leaf
+    assert om.is_noise_box(50, 51, 0.860) is True   # 义 leaf
+    assert om.is_noise_box(25, 28, 0.386) is True   # 水 texture
+    # Real small text reads HIGH confidence -> keep (this was the regression).
+    assert om.is_noise_box(49, 49, 0.949) is False  # 嗝 SFX
+    assert om.is_noise_box(49, 52, 1.000) is False  # lone 这
+    # Anything with a dimension >= floor is never noise, regardless of conf.
+    assert om.is_noise_box(63, 58, 0.5) is False    # 啊 SFX
+    assert om.is_noise_box(160, 146, 0.2) is False  # 啪 SFX
+    assert om.is_noise_box(220, 127, 0.1) is False  # 主人 dialogue
+    # Unknown confidence -> fail open (keep).
+    assert om.is_noise_box(30, 30, None) is False
 
 
 def test_read_boxes_text_drops_noise_boxes(monkeypatch):
-    # A foliage-sized detection must never reach the block-building stage.
+    # A foliage-sized LOW-confidence detection must never reach block-building,
+    # but a small HIGH-confidence one (real SFX) must survive.
     class _FakePipeline:
         def predict(self, _arr):
             return [{
                 "dt_polys": [
-                    [[0, 0], [0, 200], [60, 200], [60, 0]],   # real vertical text
-                    [[900, 900], [900, 940], [940, 940], [940, 900]],  # leaf noise
+                    [[0, 0], [0, 200], [60, 200], [60, 0]],     # real vertical text
+                    [[900, 900], [900, 940], [940, 940], [940, 900]],  # leaf noise (low conf)
+                    [[500, 500], [500, 549], [549, 549], [549, 500]],  # 嗝 SFX (high conf)
                 ],
-                "rec_texts": ["问世间情为何物", "义"],
-                "rec_scores": [0.99, 0.86],
+                "rec_texts": ["问世间情为何物", "义", "嗝"],
+                "rec_scores": [0.99, 0.86, 0.95],
             }]
 
     monkeypatch.setattr(om, "_pipeline", lambda lang: _FakePipeline())
     monkeypatch.setattr(om, "_reocr_rotated", lambda *a, **k: ("x", 0.5))
     img = Image.new("RGB", (1000, 1000))
     boxes = om.read_boxes_text(img, "zh")
-    assert [t for _b, t, _c in boxes] == ["问世间情为何物"]
+    assert [t for _b, t, _c in boxes] == ["问世间情为何物", "嗝"]

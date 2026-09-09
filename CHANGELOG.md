@@ -2,6 +2,12 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.24.6] - 2026-09-09
+
+### Fixed
+- **Size floor was dropping real small text** — the v0.24.5 foliage filter dropped *any* box under ~55px in both dimensions, which also caught legitimate single characters and small SFX (嗝 at 0.949, a lone 这 at 1.000). The filter now requires **small AND low-confidence** (rec conf < 0.9): foliage false positives (业 0.707, 义 0.860) are still dropped, but small high-confidence text survives.
+- **Free-floating text widened too far** — lettering *every* boxless text across 60% page width spilled on-screen UI labels (连心台已升起, 牵手成功) and single characters into neighbouring panels. Only tall-narrow (vertical) captions now get the wide strip; wide footnotes and small labels keep their own width and just gain height for wrapped lines.
+
 ## [0.24.5] - 2026-09-09
 
 ### Fixed
