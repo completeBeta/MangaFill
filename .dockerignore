@@ -9,6 +9,7 @@ config
 data
 uploads
 hf-cache
+paddlex-cache
 fonts/AnimeAce-*
 tests
 *.db
