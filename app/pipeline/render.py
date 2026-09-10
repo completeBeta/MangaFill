@@ -180,12 +180,18 @@ def _merge_stacked_lines(boxes: list) -> list:
             if x_overlap <= 0.3 * min(w, bw):
                 continue  # different column — never merge across a horizontal gap
             y_gap = y - (by + bh)
-            # Reject only when the new box overlaps the previous by more than
-            # ~60% of its height (a nested/duplicate detection) or sits well
-            # below it (a different bubble). Adjacent OCR line fragments often
-            # overlap by 20-30% of their height (box padding), so -0.3*h was
-            # too tight and left a multi-line narration split across blocks.
-            if y_gap < -0.6 * h or y_gap > 0.6 * max(h, bh):
+            # Reject when the new box overlaps the block by more than ~60% of
+            # its own height (a nested/duplicate detection) or sits a visible
+            # distance below it (a separate bubble, not a wrapped line).
+            # Adjacent OCR line fragments overlap by 20-30% of their height
+            # (box padding) and carry a gap of only a few px, so judge the gap
+            # against the FRAGMENT height (`min(h, bh)`), NOT the accumulated
+            # block height: `max(h, bh)` grew the threshold as the block grew,
+            # so a tall block greedily absorbed the next vertically-stacked
+            # bubble below it (three separate manhua bubbles merged into one
+            # giant floating text block). A real inter-bubble gap is well over
+            # half a line height.
+            if y_gap < -0.6 * h or y_gap > 0.6 * min(h, bh):
                 continue  # not vertically adjacent
             nx = min(bx, x)
             ny = min(by, y)
@@ -316,7 +322,15 @@ def _caption_region(bbox: tuple, page_w: int, page_h: int) -> tuple:
     everything else keeps its own width and just gains vertical room.
     """
     x, y, w, h = bbox
-    nw = int(page_w * 0.6) if h > w * 1.5 else w
+    if h > w * 1.5:
+        # Vertical caption (问世间情为何物): English is horizontal, so give it a
+        # strip whose width tracks the source text's length (its vertical height
+        # is a proxy for char count), capped at 60% page. A fixed 60%-page strip
+        # blew up SHORT vertical labels — a 2-char 大吉 (Great fortune) typeset
+        # across a page-wide strip became an enormous font.
+        nw = max(w, min(int(h * 1.5), int(page_w * 0.6)))
+    else:
+        nw = w
     nx = max(0, min(x, page_w - nw))  # keep it on-page
     nh = max(int(h * 1.5), int(page_h * 0.06))
     ny = max(0, y + h // 2 - nh // 2)  # center the strip on the source text

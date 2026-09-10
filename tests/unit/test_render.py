@@ -79,9 +79,20 @@ def test_caption_region_centers_on_vertical_caption():
     # A tall vertical caption (问世间情为何物, 72x461) must get a WIDE strip (English
     # is horizontal) roughly centered on the original text's vertical position.
     x, y, w, h = _caption_region((754, 376, 72, 461), 1600, 2262)
-    assert w >= int(1600 * 0.6)   # wide enough for horizontal English
+    assert w >= int(461 * 1.5)   # wide enough for horizontal English (tracks text length)
     # strip's vertical centre is near the original text's centre
     assert abs((y + h // 2) - (376 + 461 // 2)) < h // 2 + 1
+
+
+def test_caption_region_short_vertical_label_not_page_wide():
+    from app.pipeline.render import _caption_region
+
+    # A SHORT vertical label (a 2-char 大吉 on the fortune stone, 97x173) must NOT
+    # blow up to a 60%-page-wide strip (which would typeset "Great fortune" at an
+    # enormous font). Width tracks the text length instead.
+    x, y, w, h = _caption_region((225, 621, 97, 173), 1600, 2262)
+    assert w < int(1600 * 0.6)
+    assert w >= 97
 
 
 def test_caption_region_clamps_to_page_edge():
@@ -284,3 +295,25 @@ def test_merge_stacked_lines_merges_overlapping_fragments():
     merged = _merge_stacked_lines(boxes)
     assert len(merged) == 1
     assert merged[0][1] == "资料上虽然是怎么写的……"
+
+
+def test_merge_stacked_lines_keeps_separate_bubbles():
+    from app.pipeline.render import _merge_stacked_lines
+
+    # A tall bubble (5 tightly-stacked fragments) followed by a SEPARATE bubble
+    # ~100px below must NOT merge. The old `0.6 * max(h, bh)` gap threshold
+    # scaled with the ACCUMULATED block height, so the grown block (220px) let a
+    # 100px inter-bubble gap pass (0.6*220=132) and greedily absorbed the next
+    # bubble — three manhua bubbles became one giant floating text block.
+    boxes = [
+        ((100, 100, 200, 40), "a1", 1.0),
+        ((100, 145, 200, 40), "a2", 1.0),
+        ((100, 190, 200, 40), "a3", 1.0),
+        ((100, 235, 200, 40), "a4", 1.0),
+        ((100, 280, 200, 40), "a5", 1.0),   # block A ends at y=320
+        ((100, 420, 200, 40), "b1", 1.0),   # gap 100px -> separate bubble
+    ]
+    merged = _merge_stacked_lines(boxes)
+    assert len(merged) == 2
+    assert merged[0][1] == "a1a2a3a4a5"
+    assert merged[1][1] == "b1"

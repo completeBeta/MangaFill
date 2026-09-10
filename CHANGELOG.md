@@ -2,6 +2,12 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.24.7] - 2026-09-10
+
+### Fixed
+- **Separate manhua/webtoon bubbles merged into one giant block** — `_merge_stacked_lines` judged the inter-fragment gap against the *accumulated* block height (`0.6 * max(h, bh)`), so once a bubble grew tall, its gap threshold grew with it and it greedily absorbed the next vertically-stacked bubble below. Three separate bubbles became one enormous floating text block spanning the panel. The gap is now judged against the *fragment* height (`0.6 * min(h, bh)`), so a real inter-bubble gap (well over half a line height) splits correctly while wrapped lines within one bubble still merge.
+- **Short vertical labels blew up to a page-wide strip** — a 2-char vertical label (大吉) with no enclosing speech box was lettered across a fixed 60%-page strip, typeset at an enormous font. The vertical-caption strip width now tracks the source text's length (≈ its vertical height), capped at 60% page.
+
 ## [0.24.6] - 2026-09-09
 
 ### Fixed
