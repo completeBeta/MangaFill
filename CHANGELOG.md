@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.24.8] - 2026-09-10
+
+### Fixed
+- **Chinese/Korean text misaligned — bubbles found by fragile colour flood-fill.** The ko/zh path recovered each speech box with a white/coloured flood-fill (`find_speech_box`), which leaked or returned None for spiked/coloured/anti-aliased bubbles, so English lettering overflowed the bubble, shrank to a tight OCR box, or drifted off-centre. It now runs the SAME RT-DETR bubble detector the ja path uses (`ogkalu/comic-text-and-bubble-detector`, language-agnostic) and assigns each OCR line to its bubble via `find_parent_bubble`, then letters into the bubble's inscribed rectangle. The flood-fill remains only as a fallback for bubbles the detector misses.
+
 ## [0.24.7] - 2026-09-10
 
 ### Fixed

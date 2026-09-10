@@ -474,7 +474,18 @@ def render_translated_page(
             for (x, y, w, h), text, conf in boxes
             if text and _has_japanese(text) and not is_noise_box(w, h, conf)
         ]
-        bubbles = []
+        # Speech-bubble boundaries from the SAME RT-DETR detector the ja path
+        # uses — it finds the bubble regions automatically (language-agnostic),
+        # so English lettering sizes + fits into the real bubble instead of
+        # relying on the fragile colour flood-fill. Reuses the worker's
+        # /detect-ocr (its manga-ocr OCR output is discarded — only `bubble` is
+        # wanted here). Falls back to [] so the typesetter uses find_speech_box.
+        bubbles = None
+        if gpu_worker_url:
+            try:
+                bubbles = remote_detect_ocr(image, gpu_worker_url).get("bubble") or []
+            except Exception:
+                bubbles = []
     elif gpu_worker_url:
         try:
             emit("detect")
@@ -547,27 +558,33 @@ def render_translated_page(
     targets: list[tuple[TextBlock, tuple]] = []
     erase: list[tuple] = []
     if lang in ("ko", "zh"):
-        # Webtoon/manhua: no drawn bubbles, and the OCR box is the TIGHT text
-        # region, not the speech box. Recover the enclosing speech box (white or
-        # coloured) so English lettering sizes up into the real box instead of
-        # shrinking into the tight OCR box (the "text too small / dead space"
-        # problem). Falls back to the OCR box when there's no clean container
-        # (narration directly on artwork) — those keep the old sizing.
+        # Webtoon/manhua: the OCR box is the TIGHT text region, not the speech
+        # box. Resolve the enclosing speech box in order of trust:
+        #   1) RT-DETR `bubble` (the ja path's detector) — finds the boundary
+        #      automatically, inset to its inscribed rectangle so oval/spiked
+        #      bubbles don't spill.
+        #   2) colour flood-fill (`find_speech_box`) — for bubbles the detector
+        #      missed.
+        #   3) caption strip — free-floating text with no enclosing box at all.
         for b in blocks:
             if b.orientation == "furigana":
                 erase.append(b.bbox)
                 continue
             if not b.translation:
                 continue
-            sb = find_speech_box(image_np, b.bbox)
-            if sb:
-                region = _inset_box(sb)
+            region = find_parent_bubble(bubbles, b.bbox) if bubbles else None
+            if region is not None:
+                region = _inset_box(region)
             else:
-                # Free-floating text on artwork (vertical caption or horizontal
-                # footnote) with no enclosing box: English is always horizontal,
-                # so letter it across a generous strip instead of fitting it to
-                # the source text's (tall-narrow or short-wide) box shape.
-                region = _caption_region(b.bbox, image.width, image.height)
+                sb = find_speech_box(image_np, b.bbox)
+                if sb:
+                    region = _inset_box(sb)
+                else:
+                    # Free-floating text on artwork (vertical caption or horizontal
+                    # footnote) with no enclosing box: English is always horizontal,
+                    # so letter it across a generous strip instead of fitting it to
+                    # the source text's (tall-narrow or short-wide) box shape.
+                    region = _caption_region(b.bbox, image.width, image.height)
             targets.append((b, region))
             erase.append(b.bbox)
     elif bubbles is not None:
