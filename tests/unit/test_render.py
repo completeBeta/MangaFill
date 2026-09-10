@@ -24,6 +24,28 @@ def test_orientation_classifies_by_shape():
     assert _orientation(10, 40) == "furigana"      # narrow ruby column
 
 
+def test_drop_low_confidence_never_drops_unknown_or_legit():
+    from app.pipeline.render import _drop_low_confidence
+
+    # manga-ocr (ja) emits no confidence -> never dropped by the confidence gate.
+    assert _drop_low_confidence(None) is False
+    # Legit PaddleOCR reads (zh/ko) sit well above the threshold.
+    assert _drop_low_confidence(0.999) is False
+    assert _drop_low_confidence(0.895) is False
+    assert _drop_low_confidence(0.51) is False
+    # Exactly at the threshold is kept (only strictly-below is dropped).
+    assert _drop_low_confidence(0.5) is False
+
+
+def test_drop_low_confidence_drops_garbage_sfx():
+    from app.pipeline.render import _drop_low_confidence
+
+    # Misread SFX / decorative glyphs / garbled signs read below 0.5.
+    assert _drop_low_confidence(0.37) is True   # 阿大奥色狂
+    assert _drop_low_confidence(0.11) is True   # 福
+    assert _drop_low_confidence(0.473) is True  # 房育院院司民房院房理司
+
+
 def test_inset_box_shrinks_edges():
     from app.pipeline.render import _inset_box
 

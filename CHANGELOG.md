@@ -2,6 +2,11 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.24.9] - 2026-09-10
+
+### Fixed
+- **Misread SFX / decorative glyphs transliterated as nonsense.** PaddleOCR reads real dialogue at ~0.9-1.0 confidence but garbles stylized SFX and decorative hanzi at <0.5 (e.g. 阿大奥色狂→"Ah Da Ao Se Kuang", 福→"Blessing", a garbled sign→"Fang Yu Yuan Yuan Si Min"). Those low-confidence boxes are now dropped so the original artwork stays untouched. Japanese is unaffected (manga-ocr emits no confidence score, so the gate never sees it); Korean legit text reads ≥0.51, safely above the 0.5 threshold.
+
 ## [0.24.8] - 2026-09-10
 
 ### Fixed

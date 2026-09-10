@@ -45,6 +45,19 @@ def _has_japanese(text: str) -> bool:
     return has_cjk_or_hangul(text)
 
 
+# PaddleOCR (ko/zh) returns a per-box recognition confidence. Legit dialogue
+# reads ~0.9-1.0; misread SFX / decorative glyphs / garbled signs read below
+# ~0.5 (e.g. 阿大奥色狂 0.37, 福 0.11, 房育院院司民房院房理司 0.47). Drop those so the
+# original artwork is left untouched instead of being transliterated as nonsense.
+# manga-ocr (ja) emits NO confidence (None), so this gate never touches Japanese.
+_MIN_CONFIDENCE = 0.5
+
+
+def _drop_low_confidence(conf) -> bool:
+    """True if a recognition confidence is clearly a misread (SFX/decorative)."""
+    return conf is not None and conf < _MIN_CONFIDENCE
+
+
 # 第百五話 / 第105話 / 第1章 — a chapter/episode heading. This is a rock-solid
 # marker that the page is a table of contents or a chapter-title page (cover and
 # credit pages carry no chapter numbers), so its horizontal text is safe to
@@ -473,6 +486,7 @@ def render_translated_page(
                       orientation=_orientation(w, h))
             for (x, y, w, h), text, conf in boxes
             if text and _has_japanese(text) and not is_noise_box(w, h, conf)
+            and not _drop_low_confidence(conf)
         ]
         # Speech-bubble boundaries from the SAME RT-DETR detector the ja path
         # uses — it finds the bubble regions automatically (language-agnostic),
