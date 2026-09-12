@@ -2,6 +2,19 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.25.0] - 2026-09-12
+
+### Added
+- **Slanted speech-bubble text now rotates to match the bubble's tilt.** Webtoon/manhua bubbles are often drawn at an angle; the pipeline previously flattened OCR quads to axis-aligned boxes and lettered English dead-horizontal. A new `TextBlock.angle` field + `region_angle()` (`cv2.minAreaRect` on the bubble's fill shape) computes the tilt, and the typesetter rotates the text to match (positive = down-to-right).
+- **Webtoon page-boundary lookahead + carryover.** A bubble straddling two vertical-scroll cuts is now read whole (next page's top ~500px stitched on) and its below-cut half carried over, so English stays continuous when re-stacked.
+
+### Fixed
+- **Multi-line Korean/Chinese dialogue silently dropped.** `_drop_titles` (a Japanese title-art heuristic) matched tall multi-line ko/zh speech bubbles and threw them away; now gated to `lang == "ja"`. Recovered 17 blocks across 8 pages.
+- **Overlapping OCR lines from tilted bubbles double-typeset.** Same-line fragments now merge instead of stacking two translations on top of each other.
+- **Korean spaced lines split into word boxes** (`좋지 않아?` → `좋지` + `않아?`) are merged left-to-right before translation.
+- **Stale `text_blocks` accumulated on re-render** — now cleared before persisting, so the viewer shows no duplicates.
+- **Stale page images after re-render** — cache-busting headers (`Cache-Control: no-store`) on page endpoints.
+
 ## [0.24.9] - 2026-09-10
 
 ### Fixed
