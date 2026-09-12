@@ -200,19 +200,17 @@ def _merge_stacked_lines(boxes: list) -> list:
             if x_overlap <= 0.3 * min(w, bw):
                 continue  # different column — never merge across a horizontal gap
             y_gap = y - (by + bh)
-            # Reject when the new box overlaps the block by more than ~60% of
-            # its own height (a nested/duplicate detection) or sits a visible
-            # distance below it (a separate bubble, not a wrapped line).
-            # Adjacent OCR line fragments overlap by 20-30% of their height
-            # (box padding) and carry a gap of only a few px, so judge the gap
-            # against the FRAGMENT height (`min(h, bh)`), NOT the accumulated
-            # block height: `max(h, bh)` grew the threshold as the block grew,
-            # so a tall block greedily absorbed the next vertically-stacked
-            # bubble below it (three separate manhua bubbles merged into one
-            # giant floating text block). A real inter-bubble gap is well over
-            # half a line height.
-            if y_gap < -0.6 * h or y_gap > 0.6 * min(h, bh):
-                continue  # not vertically adjacent
+            # A nested/duplicate detection (the same text region OCR'd twice,
+            # or a sub-region of an already-seen block) sits almost ENTIRELY
+            # inside the block — near-full containment. A tilted multi-line
+            # bubble's lines overlap only PARTIALLY: their axis-aligned boxes
+            # overlap heavily because of the slant, but the text is distinct.
+            # So reject only near-full containment (a real duplicate) and merge
+            # partial overlap (an adjacent line of the same tilted bubble).
+            if _box_containment((x, y, w, h), (bx, by, bw, bh)) > 0.9:
+                continue  # nested/duplicate detection — not a distinct line
+            if y_gap > 0.6 * min(h, bh):
+                continue  # separate bubble below (visible gap)
             nx = min(bx, x)
             ny = min(by, y)
             nx2 = max(bx + bw, x + w)
