@@ -24,7 +24,7 @@ import re
 import numpy as np
 from PIL import Image
 
-from .bubble import find_container, find_speech_box, is_free_floating
+from .bubble import find_container, find_speech_box, is_free_floating, region_angle
 from .detector import detect_containers, find_parent_bubble
 from .ingest import load_image
 from .inpaint import inpaint_text
@@ -91,6 +91,12 @@ def _drop_corner_watermarks(blocks: list[TextBlock], page_w: int, page_h: int) -
     otherwise be "translated" into nonsense ("Tencent Comics") over the logo. A
     publisher mark sits in the bottom ~6% of the page and hugs either edge; real
     story text (footnotes, captions) sits higher and more centrally.
+
+    A bottom-corner narration CAPTION also hugs the left edge (its text is
+    left-aligned inside a centered box), so the edge check alone wrongly drops
+    it. A publisher mark is a narrow logo while a narration caption spans a much
+    wider fraction of the page — require narrowness too, so wide captions are
+    kept and only narrow corner marks are dropped.
     """
     if page_h <= 0:
         return blocks
@@ -99,6 +105,7 @@ def _drop_corner_watermarks(blocks: list[TextBlock], page_w: int, page_h: int) -
         if not (
             b.bbox[1] > 0.94 * page_h
             and (b.bbox[0] < 0.25 * page_w or b.bbox[0] + b.bbox[2] > 0.75 * page_w)
+            and b.bbox[2] < 0.25 * page_w
         )
     ]
 
@@ -185,7 +192,7 @@ def _merge_stacked_lines(boxes: list) -> list:
         return boxes
     ordered = sorted(boxes, key=lambda b: (b[0][1], b[0][0]))
     blocks: list[dict] = []
-    for (x, y, w, h), text, conf in ordered:
+    for (x, y, w, h), text, conf, angle in ordered:
         placed = False
         for blk in reversed(blocks):
             bx, by, bw, bh = blk["bbox"]
@@ -213,13 +220,16 @@ def _merge_stacked_lines(boxes: list) -> list:
             blk["bbox"] = (nx, ny, nx2 - nx, ny2 - ny)
             blk["text"] += text
             blk["conf"] = max(blk["conf"], conf)
+            blk["aw"] += angle * w  # width-weighted slant accumulator
+            blk["ww"] += w
             placed = True
             break
         if not placed:
-            blocks.append({"bbox": (x, y, w, h), "text": text, "conf": conf})
+            blocks.append({"bbox": (x, y, w, h), "text": text, "conf": conf,
+                           "aw": angle * w, "ww": w})
     # Reading order: top-to-bottom, then left-to-right.
     blocks.sort(key=lambda b: (b["bbox"][1], b["bbox"][0]))
-    return [(b["bbox"], b["text"], b["conf"]) for b in blocks]
+    return [(b["bbox"], b["text"], b["conf"], b["aw"] / b["ww"]) for b in blocks]
 
 
 def _iou(a: tuple, b: tuple) -> float:
@@ -250,6 +260,40 @@ def _box_containment(a: tuple, b: tuple) -> float:
     inter = (x1 - x0) * (y1 - y0)
     smaller = min(aw * ah, bw * bh)
     return inter / smaller if smaller else 0.0
+
+
+def _overlaps_any(bbox: tuple, boxes: list[tuple]) -> bool:
+    """True if `bbox` substantially overlaps any box (a nested/duplicate region,
+    or a carryover region a previous page already drew)."""
+    return any(_box_containment(bbox, q) > 0.5 or _iou(bbox, q) > 0.5 for q in boxes)
+
+
+def _paste_carryover(result_np: np.ndarray, carryover: list) -> np.ndarray:
+    """Paste carryover patches (a previous page's bubble bottom halves) onto a
+    rendered page array. Each entry is ``(patch, (x, y, w, h))`` in this page's
+    coordinates."""
+    out = result_np.copy()
+    for patch, (cx, cy, cw, ch) in carryover:
+        out[cy:cy + ch, cx:cx + cw] = patch
+    return out
+
+
+def _extract_carryover(result_np: np.ndarray, targets: list, page_h: int) -> list:
+    """Extract the below-boundary halves of bubbles that straddle `page_h`.
+
+    Returns ``[(patch, (x, 0, w, h))]`` — each patch is the rendered bottom half
+    of a boundary bubble, in the NEXT page's coordinates (y shifted to 0)."""
+    patches: list = []
+    for _b, region in targets:
+        if region is None:
+            continue
+        rx, ry, rw, rh = region
+        if ry < page_h < ry + rh:
+            bottom = min(ry + rh, result_np.shape[0])
+            patch = result_np[page_h:bottom, rx:rx + rw].copy()
+            if patch.size:
+                patches.append((patch, (rx, 0, rw, bottom - page_h)))
+    return patches
 
 
 def _dedup_boxes(boxes: list[tuple], seen: list[tuple], keep: str = "largest") -> list[tuple]:
@@ -415,7 +459,9 @@ def render_translated_page(
     gpu_worker_url: str = "",
     progress_cb=None,
     lang: str = "auto",
-) -> tuple[Image.Image, list[TextBlock], int, int]:
+    lookahead: np.ndarray | None = None,
+    carryover: list | None = None,
+) -> tuple[Image.Image, list[TextBlock], int, int, list]:
     """Run the full pipeline on one page.
 
     Returns (result PIL image, blocks with translations, prompt_tokens,
@@ -440,10 +486,11 @@ def render_translated_page(
 
     image = Image.fromarray(load_image(image_path))
     image_np = np.asarray(image)
+    page_w, page_h = image.width, image.height
 
     # Blank dividers are left byte-for-byte unchanged — no dialogue to translate.
     if _is_blank(image_np):
-        return image, [], 0, 0
+        return image, [], 0, 0, []
 
     if lang == "auto":
         lang = detect_language(image)
@@ -454,7 +501,18 @@ def render_translated_page(
     # mangles colour art — skip them. Korean webtoons & Chinese manhua are
     # coloured BY DESIGN and carry dialogue, so only the JP path skips colour.
     if lang == "ja" and _is_color(image):
-        return image, [], 0, 0
+        return image, [], 0, 0, []
+
+    # ---- stitch lookahead (boundary-spanning bubbles) ------------------------
+    # Vertical-scroll webtoons cut a speech bubble at the page boundary: its top
+    # half lands here and bottom half on the next page, so OCR reads half-glyphs
+    # → garbage translation. Stitching the next page's top strip onto the bottom
+    # of this page lets detect/OCR see the WHOLE bubble. The below-boundary half
+    # is carried to the next page (see the typeset/paste section) so the English
+    # stays continuous when pages are re-stacked into the vertical scroll.
+    if lookahead is not None and lookahead.shape[1] == page_w:
+        image_np = np.vstack([image_np, lookahead])
+        image = Image.fromarray(image_np)
 
     # ---- detect + OCR --------------------------------------------------------
     bubbles = None
@@ -483,8 +541,8 @@ def render_translated_page(
         boxes = _merge_stacked_lines(boxes)
         blocks = [
             TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,
-                      orientation=_orientation(w, h))
-            for (x, y, w, h), text, conf in boxes
+                      orientation=_orientation(w, h), angle=angle)
+            for (x, y, w, h), text, conf, angle in boxes
             if text and _has_japanese(text) and not is_noise_box(w, h, conf)
             and not _drop_low_confidence(conf)
         ]
@@ -534,19 +592,33 @@ def render_translated_page(
     # watermarks) so it is left byte-for-byte untouched — never re-translated or
     # re-lettered on top of existing English. Covers the remote-worker path too,
     # which returns blocks without this filter. Also dedup nested/overlapping
-    # blocks (the worker returns the same region at several granularities).
-    # Then skip large stylized titles/logos (mis-OCR'd) and split bulleted stat
-    # columns into per-line blocks so each stat typesets on its own line.
-    blocks = _split_bullet_lines(
-        _drop_titles(
-            _dedup_blocks(
-                _drop_corner_watermarks(
-                    _drop_non_japanese(blocks), image.width, image.height
-                )
-            ),
-            image.height,
+    # blocks (the worker returns the same region at several granularities) and
+    # split bulleted stat columns into per-line blocks.
+    blocks = _dedup_blocks(
+        _drop_corner_watermarks(
+            _drop_non_japanese(blocks), page_w, page_h
         )
     )
+    if lang == "ja":
+        # Large stylized titles/logos (series title, section headers) are
+        # mis-OCR'd by manga-ocr, so leave them untouched — but only for
+        # Japanese. Korean/Chinese webtoon dialogue is horizontal and always
+        # translated; the height heuristic would wrongly drop a multi-line
+        # speech bubble as a "title" (e.g. a 5-line bubble > 15% of the page).
+        blocks = _drop_titles(blocks, page_h)
+    blocks = _split_bullet_lines(blocks)
+
+    # ---- boundary filtering (lookahead / carryover) --------------------------
+    # Drop blocks that belong to the next page (entirely in the lookahead strip)
+    # or that were already resolved by the previous page (their bottom half was
+    # drawn there and carried over here as a paste patch).
+    if lookahead is not None or carryover:
+        carryover_boxes = [tuple(c[1]) for c in (carryover or [])]
+        blocks = [
+            b for b in blocks
+            if not (lookahead is not None and b.bbox[1] >= page_h)
+            and not _overlaps_any(b.bbox, carryover_boxes)
+        ]
 
     # ---- translate (cloud LLM) ----------------------------------------------
     if dry_run:
@@ -586,19 +658,30 @@ def render_translated_page(
                 continue
             if not b.translation:
                 continue
-            region = find_parent_bubble(bubbles, b.bbox) if bubbles else None
-            if region is not None:
-                region = _inset_box(region)
+            raw = find_parent_bubble(bubbles, b.bbox) if bubbles else None
+            if raw is not None:
+                region = _inset_box(raw)
             else:
                 sb = find_speech_box(image_np, b.bbox)
                 if sb:
+                    raw = sb
                     region = _inset_box(sb)
                 else:
                     # Free-floating text on artwork (vertical caption or horizontal
                     # footnote) with no enclosing box: English is always horizontal,
                     # so letter it across a generous strip instead of fitting it to
                     # the source text's (tall-narrow or short-wide) box shape.
-                    region = _caption_region(b.bbox, image.width, image.height)
+                    raw = None
+                    region = _caption_region(b.bbox, page_w, page_h)
+            # Tilt the English lettering to match a slanted speech box. The
+            # angle comes from the box's fill shape (region_angle), not the OCR
+            # quad — the GPU worker returns only axis-aligned boxes. Vertical
+            # source text is re-lettered horizontally, so it is never rotated.
+            b.angle = (
+                region_angle(image_np, raw)
+                if raw is not None and b.orientation != "vertical"
+                else 0.0
+            )
             targets.append((b, region))
             erase.append(b.bbox)
     elif bubbles is not None:
@@ -636,6 +719,10 @@ def render_translated_page(
             erase.append(b.bbox)
 
     # ---- inpaint (remote GPU worker → local LaMa) ----------------------------
+    # Erase the Korean in carryover regions even if detection missed them, so a
+    # pasted English patch never sits on un-erased source text.
+    for _patch, cbox in (carryover or []):
+        erase.append(tuple(cbox))
     if erase:
         emit("inpaint")
         if gpu_worker_url:
@@ -652,4 +739,20 @@ def render_translated_page(
     regions = {id(b): region for b, region in targets if region is not None}
     emit("typeset")
     result = typeset_page(inpainted, blocks, font_id=font_id, regions=regions, only=only)
-    return result, blocks, pt, ct
+
+    # ---- paste carryover patches (previous page's bubble bottom halves) ------
+    if carryover:
+        result = Image.fromarray(_paste_carryover(np.asarray(result), carryover))
+
+    # ---- carry boundary bubbles' bottom halves to the NEXT page --------------
+    # A bubble that straddles the cut is rendered once (into its full region,
+    # which extends into the lookahead strip). Cropping keeps the top half here
+    # and the extracted patch hands the bottom half to the next page, so the
+    # split bubble's English lines up when pages are re-stacked vertically.
+    carryover_out: list = []
+    if lookahead is not None:
+        carryover_out = _extract_carryover(np.asarray(result), targets, page_h)
+
+    if result.height > page_h:
+        result = result.crop((0, 0, result.width, page_h))
+    return result, blocks, pt, ct, carryover_out

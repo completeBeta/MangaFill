@@ -285,10 +285,10 @@ def test_merge_stacked_lines_groups_columns():
     from app.pipeline.render import _merge_stacked_lines
 
     boxes = [
-        ((100, 100, 200, 40), "line1", 0.9),
-        ((100, 145, 200, 40), "line2", 0.9),
-        ((100, 190, 200, 40), "line3", 0.9),
-        ((400, 100, 200, 40), "other", 0.9),   # separate column (no x-overlap)
+        ((100, 100, 200, 40), "line1", 0.9, 0.0),
+        ((100, 145, 200, 40), "line2", 0.9, 0.0),
+        ((100, 190, 200, 40), "line3", 0.9, 0.0),
+        ((400, 100, 200, 40), "other", 0.9, 0.0),   # separate column (no x-overlap)
     ]
     merged = _merge_stacked_lines(boxes)
     assert len(merged) == 2
@@ -299,7 +299,7 @@ def test_merge_stacked_lines_groups_columns():
 def test_merge_stacked_lines_keeps_single():
     from app.pipeline.render import _merge_stacked_lines
 
-    boxes = [((100, 100, 200, 40), "solo", 0.9)]
+    boxes = [((100, 100, 200, 40), "solo", 0.9, 0.0)]
     assert _merge_stacked_lines(boxes) == boxes
 
 
@@ -310,9 +310,9 @@ def test_merge_stacked_lines_merges_overlapping_fragments():
     # padding) — a multi-line narration must still merge into one block, not
     # three separate "floating" translations.
     boxes = [
-        ((622, 463, 165, 69), "资料上虽", 1.0),
-        ((616, 512, 163, 66), "然是怎么", 1.0),
-        ((611, 561, 163, 62), "写的……", 0.98),
+        ((622, 463, 165, 69), "资料上虽", 1.0, 0.0),
+        ((616, 512, 163, 66), "然是怎么", 1.0, 0.0),
+        ((611, 561, 163, 62), "写的……", 0.98, 0.0),
     ]
     merged = _merge_stacked_lines(boxes)
     assert len(merged) == 1
@@ -328,12 +328,12 @@ def test_merge_stacked_lines_keeps_separate_bubbles():
     # 100px inter-bubble gap pass (0.6*220=132) and greedily absorbed the next
     # bubble — three manhua bubbles became one giant floating text block.
     boxes = [
-        ((100, 100, 200, 40), "a1", 1.0),
-        ((100, 145, 200, 40), "a2", 1.0),
-        ((100, 190, 200, 40), "a3", 1.0),
-        ((100, 235, 200, 40), "a4", 1.0),
-        ((100, 280, 200, 40), "a5", 1.0),   # block A ends at y=320
-        ((100, 420, 200, 40), "b1", 1.0),   # gap 100px -> separate bubble
+        ((100, 100, 200, 40), "a1", 1.0, 0.0),
+        ((100, 145, 200, 40), "a2", 1.0, 0.0),
+        ((100, 190, 200, 40), "a3", 1.0, 0.0),
+        ((100, 235, 200, 40), "a4", 1.0, 0.0),
+        ((100, 280, 200, 40), "a5", 1.0, 0.0),   # block A ends at y=320
+        ((100, 420, 200, 40), "b1", 1.0, 0.0),   # gap 100px -> separate bubble
     ]
     merged = _merge_stacked_lines(boxes)
     assert len(merged) == 2

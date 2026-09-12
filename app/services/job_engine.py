@@ -26,6 +26,9 @@ log = get_logger("job_engine")
 
 _IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 _CHUNK = 1024 * 1024  # 1 MB streaming chunks — never read a whole upload into RAM
+# Vertical-scroll webtoon lookahead: how much of the next page's top to stitch
+# onto the current page so a bubble cut at the page boundary is seen whole.
+LOOKAHEAD_PX = 500
 
 
 def _now() -> str:
@@ -34,6 +37,20 @@ def _now() -> str:
 
 def _natural_key(name: str) -> list:
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
+
+
+def _load_lookahead(path: str, px: int):
+    """Load the top `px` rows of the next page as an RGB uint8 array (or None)."""
+    try:
+        import numpy as np
+        from PIL import Image
+
+        with Image.open(path) as im:
+            im = im.convert("RGB")
+            w, h = im.size
+            return np.asarray(im.crop((0, 0, w, min(px, h))))
+    except Exception:
+        return None
 
 
 def resolve_translation(db, model_id=None) -> tuple[Model | None, bool]:
@@ -189,7 +206,9 @@ def process_job(job_id: int) -> None:
             job.updated_at = _now()
             db.commit()
 
-        for p in pages:
+        carryover: list = []  # patches handed from the previous page (boundary bubbles)
+        do_lookahead = lang in ("ko", "zh")
+        for idx, p in enumerate(pages):
             # Respect stop/pause set from the API mid-run (fresh read from DB).
             try:
                 db.refresh(job)
@@ -204,10 +223,14 @@ def process_job(job_id: int) -> None:
             job.stage = "detect"
             db.commit()
             try:
-                img, blocks, pt, ct = render_translated_page(
+                lookahead = None
+                if do_lookahead and idx + 1 < len(pages):
+                    lookahead = _load_lookahead(pages[idx + 1].original_path, LOOKAHEAD_PX)
+                img, blocks, pt, ct, carryover = render_translated_page(
                     p.original_path, model, key, base_url, dry_run=dry_run,
                     font_id=font_id, gpu_worker_url=gpu_url,
                     progress_cb=_progress, lang=lang,
+                    lookahead=lookahead, carryover=carryover,
                 )
                 out_path = _save_output(img, out_dir, p.original_path)
                 p.output_path = out_path

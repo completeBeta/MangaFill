@@ -14,6 +14,7 @@ class TextBlock:
     translation: str = ""                      # EN translation (LLM output)
     confidence: float | None = None
     orientation: str = "horizontal"            # horizontal | vertical | furigana
+    angle: float = 0.0                         # text-line slant (deg, [-45,45], + = down-to-right)
 
 
 def polygon_to_bbox(box: list) -> tuple:

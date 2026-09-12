@@ -13,6 +13,8 @@ the app.
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import torch
 from PIL import Image
@@ -190,6 +192,33 @@ def _reocr_rotated(
     return text, conf
 
 
+def _poly_angle(poly) -> float:
+    """Slant angle (degrees, [-45, 45]) of a text-line detection quad.
+
+    Mirrors `app/pipeline/ocr_multilingual.py::_poly_angle` — keep in lockstep.
+    The angle of the quad's longest edge is the text baseline slant; positive =
+    down-to-right (clockwise), negative = up-to-right (counterclockwise).
+    Vertical text (tall-narrow quad) folds to ~0.
+    """
+    pts = np.asarray(poly, dtype=np.float64)
+    n = len(pts)
+    best_len = -1.0
+    best_ang = 0.0
+    for i in range(n):
+        a = pts[i]
+        b = pts[(i + 1) % n]
+        v = b - a
+        length = math.hypot(v[0], v[1])
+        if length > best_len:
+            best_len = length
+            best_ang = math.degrees(math.atan2(v[1], v[0]))
+    while best_ang > 45:
+        best_ang -= 90
+    while best_ang < -45:
+        best_ang += 90
+    return float(best_ang)
+
+
 def ocr_multilingual_blocks(image: Image.Image, lang: str) -> list[dict]:
     """PaddleOCR (PP-OCRv5/v6) full-pipeline detect+recognize for ko/zh.
 
@@ -230,7 +259,7 @@ def ocr_multilingual_blocks(image: Image.Image, lang: str) -> list[dict]:
             if conf < _VERTICAL_CONF_FLOOR and h > w * 1.5:
                 text, conf = _reocr_rotated(arr, x0, y0, w, h, text, conf, lang)
             out.append({"bbox": [x0, y0, w, h], "text": text,
-                        "confidence": conf})
+                        "confidence": conf, "angle": _poly_angle(poly)})
     return out
 
 

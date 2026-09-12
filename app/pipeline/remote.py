@@ -47,9 +47,10 @@ def remote_ocr_multilingual(
 ) -> list[tuple]:
     """OCR a Korean/Chinese page on the worker (PaddleOCR PP-OCRv5/v6).
 
-    Returns [(x, y, w, h), text, confidence] — the same shape as the app's
-    `read_boxes_text`, so the caller can feed either source through one
-    block-building path.
+    Returns [(x, y, w, h), text, confidence, angle] — the same shape as the
+    app's `read_boxes_text`, so the caller can feed either source through one
+    block-building path. `angle` is the text-line slant in degrees ([-45, 45]);
+    the current worker (0.3.1) doesn't return it, so it defaults to 0.0.
     """
     with httpx.Client(timeout=TIMEOUT) as c:
         r = c.post(
@@ -61,7 +62,14 @@ def remote_ocr_multilingual(
         out = []
         for b in r.json().get("blocks", []):
             x, y, w, h = b["bbox"]
-            out.append(((x, y, w, h), b.get("text", ""), float(b.get("confidence", 0.0))))
+            out.append(
+                (
+                    (x, y, w, h),
+                    b.get("text", ""),
+                    float(b.get("confidence", 0.0)),
+                    float(b.get("angle", 0.0)),
+                )
+            )
         return out
 
 

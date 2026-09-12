@@ -25,7 +25,7 @@ def test_detect_language_chinese_probes_ch_only(monkeypatch):
 
     def fake_read(image, lang):
         calls.append(lang)
-        return [((0, 0, 30, 20), "你好世界", 0.95)] if lang == "ch" else []
+        return [((0, 0, 30, 20), "你好世界", 0.95, 0.0)] if lang == "ch" else []
 
     monkeypatch.setattr(om, "read_boxes_text", fake_read)
     monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
@@ -38,7 +38,7 @@ def test_detect_language_japanese_probes_ch_only(monkeypatch):
 
     def fake_read(image, lang):
         calls.append(lang)
-        return [((0, 0, 30, 20), "こんにちは", 0.95)] if lang == "ch" else []
+        return [((0, 0, 30, 20), "こんにちは", 0.95, 0.0)] if lang == "ch" else []
 
     monkeypatch.setattr(om, "read_boxes_text", fake_read)
     monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
@@ -55,7 +55,7 @@ def test_detect_language_korean_falls_back_to_korean_probe(monkeypatch):
         calls.append(lang)
         if lang == "ch":
             return []  # no CJK signal
-        return [((0, 0, 30, 20), "안녕하세요", 0.9)]
+        return [((0, 0, 30, 20), "안녕하세요", 0.9, 0.0)]
 
     monkeypatch.setattr(om, "read_boxes_text", fake_read)
     monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
@@ -80,7 +80,7 @@ def test_detect_language_low_confidence_hanzi_not_chinese(monkeypatch):
     """Hanzi read below the 0.4 confidence floor is not treated as Chinese."""
     def fake_read(image, lang):
         if lang == "ch":
-            return [((0, 0, 30, 20), "你好", 0.3)]
+            return [((0, 0, 30, 20), "你好", 0.3, 0.0)]
         return []
 
     monkeypatch.setattr(om, "read_boxes_text", fake_read)
@@ -129,6 +129,15 @@ def test_reocr_rotated_skips_when_crop_too_small(monkeypatch):
     assert (text, conf) == ("orig", 0.1)
 
 
+def test_poly_angle_sign_and_fold():
+    # Down-to-right slant (right end lower) -> positive.
+    assert 10 < om._poly_angle([[0, 0], [200, 40], [200, 70], [0, 30]]) < 13
+    # Up-to-right slant (right end higher) -> negative.
+    assert -13 < om._poly_angle([[0, 40], [200, 0], [200, 30], [0, 70]]) < -10
+    # Vertical text (tall-narrow quad) folds to ~0 — English stays horizontal.
+    assert abs(om._poly_angle([[0, 0], [20, 0], [20, 200], [0, 200]])) < 1.0
+
+
 def test_is_noise_box_drops_small_low_conf_keeps_small_high_conf():
     # Foliage reads as single hanzi at LOW-moderate confidence -> noise.
     assert om.is_noise_box(39, 42, 0.707) is True   # 业 leaf
@@ -164,4 +173,4 @@ def test_read_boxes_text_drops_noise_boxes(monkeypatch):
     monkeypatch.setattr(om, "_reocr_rotated", lambda *a, **k: ("x", 0.5))
     img = Image.new("RGB", (1000, 1000))
     boxes = om.read_boxes_text(img, "zh")
-    assert [t for _b, t, _c in boxes] == ["问世间情为何物", "嗝"]
+    assert [t for _b, t, _c, _a in boxes] == ["问世间情为何物", "嗝"]

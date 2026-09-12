@@ -10,6 +10,8 @@ DejaVu Sans Bold. See `resolve_font_path` there.
 """
 from __future__ import annotations
 
+import math
+
 from PIL import Image, ImageDraw, ImageFont
 
 from .fonts import resolve_font_path
@@ -119,15 +121,49 @@ def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):
     return best_clean or best
 
 
-def _draw_box(draw: ImageDraw.ImageDraw, bbox: tuple, text: str, font_path: str | None, max_font: int):
+def _draw_box(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    bbox: tuple,
+    text: str,
+    font_path: str | None,
+    max_font: int,
+    angle: float = 0.0,
+):
     if not text or not text.strip():
         return
     if not font_path:
         return
     x, y, w, h = bbox
-    pad = 6
-    max_w = max(w - 2 * pad, 1)
-    max_h = max(h - 2 * pad, 1)
+    # Fit text into the bubble's INSCRIBED region, not its full bounding box.
+    # Speech bubbles are rounded-rect / oval, so their corners and top/bottom
+    # edges curve away from the bbox; lettering sized to the full bbox crowds
+    # the border (text touching the bottom edge, cramped top/bottom). An inset
+    # that scales with the bubble's smaller dimension tracks the corner radius,
+    # with a 6px floor so tiny bubbles keep the old breathing room. The block is
+    # still centered via anchor="mm" below, so it stays centred inside the curve.
+    inset = max(int(min(w, h) * 0.15), 6)
+    iw = max(w - 2 * inset, 1)
+    ih = max(h - 2 * inset, 1)
+
+    # A tilted speech bubble needs tilted lettering. The fit region is the
+    # largest rectangle (in the TEXT's rotated frame) whose θ-rotation stays
+    # inside (iw, ih); fitting to that keeps the rotated text from spilling past
+    # the bubble outline. Angles under ~3° are treated as level (detection jitter).
+    if abs(angle) >= 3.0:
+        th = math.radians(abs(angle))
+        c, s = math.cos(th), math.sin(th)
+        denom = c * c - s * s
+        fw = (iw * c - ih * s) / denom if abs(denom) > 0.02 else 0.0
+        fh = (ih * c - iw * s) / denom if abs(denom) > 0.02 else 0.0
+        if fw > 8 and fh > 8:
+            max_w, max_h = int(fw), int(fh)
+        else:  # near-45° or box shape inconsistent with the angle
+            side = max(int(min(iw, ih) / math.sqrt(2)), 1)
+            max_w = max_h = side
+    else:
+        max_w, max_h = iw, ih
+
     # Dynamic per-box sizing: the largest size (capped at `max_font`) that fits
     # the box. Short text fills a big bubble; long text shrinks to fit a small
     # one. If nothing fits, fall back to 8px (may overflow) rather than blank.
@@ -137,20 +173,53 @@ def _draw_box(draw: ImageDraw.ImageDraw, bbox: tuple, text: str, font_path: str 
         lines = _wrap(draw, text, font, max_w)
     else:
         _size, lines, font = fitted
-    draw.multiline_text(
-        (x + w // 2, y + h // 2),
-        "\n".join(lines),
+
+    joined = "\n".join(lines)
+    sw = max(1, font.size // 8)
+
+    if abs(angle) < 3.0:
+        draw.multiline_text(
+            (x + w // 2, y + h // 2),
+            joined,
+            font=font,
+            fill=(0, 0, 0),
+            anchor="mm",
+            align="center",
+            spacing=2,
+            # White outline behind the glyphs so black lettering stays readable over
+            # dark boxes/screentone (stat tables, narration panels). The stroke is
+            # sized to the font so it scales cleanly from 8px to the 32px cap.
+            stroke_width=sw,
+            stroke_fill=(255, 255, 255),
+        )
+        return
+
+    # Render the text on a tight transparent layer, rotate it to the bubble's
+    # slant, and paste it centred. PIL `rotate()` is counter-clockwise for
+    # positive angles, so a positive (down-to-right) slant needs `-angle`.
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    bb = probe.multiline_textbbox(
+        (0, 0), joined, font=font, spacing=2, align="center", stroke_width=sw
+    )
+    tw = int(bb[2] - bb[0])
+    th = int(bb[3] - bb[1])
+    pad = sw + 6  # room for the stroke + bicubic resample edge
+    layer = Image.new("RGBA", (tw + 2 * pad, th + 2 * pad), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    ld.multiline_text(
+        (pad - bb[0], pad - bb[1]),
+        joined,
         font=font,
         fill=(0, 0, 0),
-        anchor="mm",
         align="center",
         spacing=2,
-        # White outline behind the glyphs so black lettering stays readable over
-        # dark boxes/screentone (stat tables, narration panels). The stroke is
-        # sized to the font so it scales cleanly from 8px to the 32px cap.
-        stroke_width=max(1, font.size // 8),
+        stroke_width=sw,
         stroke_fill=(255, 255, 255),
     )
+    rotated = layer.rotate(-angle, resample=Image.Resampling.BICUBIC, expand=True)
+    px = int(x + w // 2 - rotated.width // 2)
+    py = int(y + h // 2 - rotated.height // 2)
+    image.paste(rotated, (px, py), rotated)
 
 
 def typeset_page(
@@ -193,5 +262,5 @@ def typeset_page(
             # text height, not the full-page cap — a short footnote should not
             # blow up to the max size just because the caption region is wide.
             bcap = min(cap, max(14, int(b.bbox[3] * 0.8)))
-        _draw_box(draw, region, b.translation, fp, bcap)
+        _draw_box(out, draw, region, b.translation, fp, bcap, angle=b.angle)
     return out

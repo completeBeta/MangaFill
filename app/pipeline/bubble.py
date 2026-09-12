@@ -92,6 +92,55 @@ def find_container(
     return None
 
 
+def region_angle(rgb: np.ndarray, region: tuple, tol: int = 55) -> float:
+    """Tilt angle (deg, [-45, 45]) of the speech-box fill within `region`.
+
+    Webtoon/manhua speech boxes are often drawn tilted, and the text inside
+    follows the tilt. Given a resolved box `region` (x, y, w, h) — an RT-DETR
+    bubble or a colour-flood-fill box — recover its fill colour from the border
+    ring, flood-fill pixels within `tol`, and fit a rotated rectangle
+    (cv2.minAreaRect) to get the tilt. Returns 0.0 when no clean fill is found
+    (free-floating text has no box to match). Positive = down-to-right
+    (clockwise), negative = up-to-right (counterclockwise) — the same convention
+    the typesetter expects.
+    """
+    x, y, w, h = region
+    H, W, _ = rgb.shape
+    if w <= 0 or h <= 0:
+        return 0.0
+    pad = 4
+    ring: list[np.ndarray] = []
+    for xx in range(max(0, x - pad), min(W, x + w + pad)):
+        if 0 <= y - pad < H:
+            ring.append(rgb[y - pad, xx])
+        if 0 <= y + h + pad < H:
+            ring.append(rgb[y + h + pad, xx])
+    for yy in range(max(0, y - pad), min(H, y + h + pad)):
+        if 0 <= x - pad < W:
+            ring.append(rgb[yy, x - pad])
+        if 0 <= x + w + pad < W:
+            ring.append(rgb[yy, x + w + pad])
+    if not ring:
+        return 0.0
+    fill = np.median(np.asarray(ring, dtype=np.float32), axis=0)
+
+    sub = rgb[y : y + h, x : x + w].astype(np.float32)
+    dist = np.abs(sub - fill).max(axis=2)
+    mask = (dist <= tol).astype(np.uint8)
+    ys, xs = np.nonzero(mask)
+    if len(xs) < 100:
+        return 0.0
+    pts = np.stack([xs, ys], axis=1).astype(np.float32)
+    (_cx, _cy), (rw, rh), ang = cv2.minAreaRect(pts)
+    if rw < rh:
+        ang += 90
+    while ang > 45:
+        ang -= 90
+    while ang < -45:
+        ang += 90
+    return float(ang)
+
+
 def is_free_floating(gray: np.ndarray, bbox: tuple, thresh: int = 215, min_white: float = 0.60) -> bool:
     """True if the text sits on a non-white background (screentone/artwork).
 

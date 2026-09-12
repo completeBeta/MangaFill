@@ -21,6 +21,8 @@ plus a kana/hangul range check is unambiguous (see `detect_language`).
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 from PIL import Image
 
@@ -85,18 +87,50 @@ def _polys_to_xywh(poly) -> tuple[int, int, int, int]:
     return x0, y0, x1 - x0, y1 - y0
 
 
+def _poly_angle(poly) -> float:
+    """Slant angle (degrees) of a text-line detection quad.
+
+    Speech bubbles in webtoons/manhua are drawn tilted, and the Korean/Chinese
+    text inside follows the tilt. PaddleOCR's `dt_polys` are the ORIGINAL
+    detection quads (a rotated rectangle around the text line), so the angle of
+    the quad's longest edge is the text baseline slant. Returns the angle folded
+    to [-45, 45]; positive = down-to-right (clockwise), negative = up-to-right
+    (counterclockwise). Vertical text (tall-narrow quad) folds to ~0, which is
+    correct — English re-lettering is horizontal.
+    """
+    pts = np.asarray(poly, dtype=np.float64)
+    n = len(pts)
+    best_len = -1.0
+    best_ang = 0.0
+    for i in range(n):
+        a = pts[i]
+        b = pts[(i + 1) % n]
+        v = b - a
+        length = math.hypot(v[0], v[1])
+        if length > best_len:
+            best_len = length
+            best_ang = math.degrees(math.atan2(v[1], v[0]))
+    while best_ang > 45:
+        best_ang -= 90
+    while best_ang < -45:
+        best_ang += 90
+    return float(best_ang)
+
+
 def _avg_conf(boxes: list[tuple]) -> float:
     """Mean recognition confidence over `read_boxes_text` output, or 0.0."""
-    return sum(c for _b, _t, c in boxes) / len(boxes) if boxes else 0.0
+    return sum(c for _b, _t, c, _a in boxes) / len(boxes) if boxes else 0.0
 
 
 def read_boxes_text(image: Image.Image, lang: str) -> list[tuple]:
-    """Detect + recognize text on a page. Returns [(x, y, w, h), text, conf].
+    """Detect + recognize text on a page. Returns [(x, y, w, h), text, conf, angle].
 
     One full PaddleOCR pass (detection + orientation + recognition) over the
     page. `dt_polys` are the ORIGINAL detection boxes (the text region in the
     source image, before any orientation rotation) — those are what typeset /
-    inpaint need. Vertical lines are still reported at their true (tall-narrow)
+    inpaint need, and their longest edge gives each line's slant `angle` (deg,
+    [-45, 45]) so the typesetter can rotate English text to match a tilted
+    bubble. Vertical lines are still reported at their true (tall-narrow)
     source box; only the recognition is run on a rotated copy internally.
 
     Vertical-column fallback: when a tall-narrow box reads weakly (conf below
@@ -121,7 +155,7 @@ def read_boxes_text(image: Image.Image, lang: str) -> list[tuple]:
                 text, conf = _reocr_rotated(arr, x, y, w, h, text, conf, lang)
             if is_noise_box(w, h, conf):
                 continue  # foliage/texture false positive (tiny + low-conf)
-            out.append(((x, y, w, h), text, conf))
+            out.append(((x, y, w, h), text, conf, _poly_angle(poly)))
     return out
 
 
@@ -198,7 +232,7 @@ def detect_language(image: Image.Image) -> str:
     recognizer for the rest of the job, not both.
     """
     ch_boxes = read_boxes_text(image, "ch")
-    ch_text = "".join(t for _b, t, _c in ch_boxes)
+    ch_text = "".join(t for _b, t, _c, _a in ch_boxes)
     ch_conf = _avg_conf(ch_boxes)
 
     if has_kana(ch_text):
@@ -211,7 +245,7 @@ def detect_language(image: Image.Image) -> str:
     # hangul). Only now pay for the korean recognizer.
     _drop("ch")
     ko_boxes = read_boxes_text(image, "ko")
-    ko_text = "".join(t for _b, t, _c in ko_boxes)
+    ko_text = "".join(t for _b, t, _c, _a in ko_boxes)
     ko_conf = _avg_conf(ko_boxes)
     _drop("ko")
     if has_hangul(ko_text) and ko_conf > 0.4:
