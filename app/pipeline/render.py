@@ -177,6 +177,53 @@ def _split_bullet_lines(blocks: list[TextBlock]) -> list[TextBlock]:
     return out
 
 
+def _merge_horizontal_words(boxes: list) -> list:
+    """Merge side-by-side word fragments on one line into a single box.
+
+    PaddleOCR splits a spaced Korean line into one box per word (space-delimited),
+    so a line like ``좋지 않아?`` comes back as ``좋지`` + ``않아?``. Words on the
+    same line share a vertical band, are of similar height, and sit a small
+    horizontal gap apart; a separate speech bubble sits at a larger gap or a
+    different vertical band. Join adjacent same-line fragments left-to-right with
+    a space so the line is translated as a unit instead of word-by-word.
+    """
+    if len(boxes) <= 1:
+        return boxes
+    ordered = sorted(boxes, key=lambda b: (b[0][1], b[0][0]))
+    lines: list[dict] = []
+    for (x, y, w, h), text, conf, angle in ordered:
+        placed = False
+        for ln in reversed(lines):
+            bx, by, bw, bh = ln["bbox"]
+            v_overlap = min(y + h, by + bh) - max(y, by)
+            if v_overlap <= 0.5 * min(h, bh):
+                continue  # different line (different vertical band)
+            if min(h, bh) < 0.6 * max(h, bh):
+                continue  # very different heights — not the same line
+            gap = max(x, bx) - min(x + w, bx + bw)  # <0 if overlapping
+            if gap > 0.5 * max(h, bh):
+                continue  # too far apart — a different bubble
+            ln["bbox"] = (min(bx, x), min(by, y),
+                          max(bx + bw, x + w) - min(bx, x),
+                          max(by + bh, y + h) - min(by, y))
+            ln["members"].append((x, text, conf, angle, w))
+            placed = True
+            break
+        if not placed:
+            lines.append({"bbox": (x, y, w, h),
+                          "members": [(x, text, conf, angle, w)]})
+    out: list = []
+    for ln in lines:
+        members = sorted(ln["members"], key=lambda m: m[0])  # left-to-right
+        text = " ".join(m[1] for m in members)
+        conf = max(m[2] for m in members)
+        aw = sum(m[3] * m[4] for m in members)
+        ww = sum(m[4] for m in members)
+        out.append((ln["bbox"], text, conf, aw / ww if ww else 0.0))
+    out.sort(key=lambda b: (b[0][1], b[0][0]))
+    return out
+
+
 def _merge_stacked_lines(boxes: list) -> list:
     """Merge vertically-stacked OCR line fragments into single blocks.
 
@@ -533,9 +580,12 @@ def render_translated_page(
                 boxes = None
         if boxes is None:
             boxes = read_boxes_text(image, lang)
-        # Merge vertically-stacked line fragments (a multi-line speech box is
-        # OCR'd one box per line) into single blocks so the whole bubble is
-        # translated + lettered as a unit instead of line-by-line.
+        # Merge horizontally-adjacent word fragments (PaddleOCR splits a spaced
+        # Korean line into one box per word — '좋지 않아?' -> '좋지' + '않아?')
+        # into one box per line, then merge vertically-stacked lines into one
+        # block so the whole bubble is translated + lettered as a unit.
+        if lang == "ko":
+            boxes = _merge_horizontal_words(boxes)
         boxes = _merge_stacked_lines(boxes)
         blocks = [
             TextBlock(bbox=(x, y, w, h), text=text, confidence=conf,

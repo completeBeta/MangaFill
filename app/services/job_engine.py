@@ -240,7 +240,11 @@ def process_job(job_id: int) -> None:
                 job.blocks_ok += sum(1 for b in blocks if b.translation)
                 job.tokens_used += (pt or 0) + (ct or 0)
                 job.cost_usd += compute_cost(m, pt or 0, ct or 0)
-                # persist detected blocks (for the side-by-side viewer / logs)
+                # persist detected blocks (for the side-by-side viewer / logs).
+                # Clear any rows from a prior run of this page first, so a
+                # re-render replaces them instead of accumulating stale
+                # duplicate blocks (which pollute the viewer and overlap scans).
+                db.query(TextBlock).filter(TextBlock.page_id == p.id).delete()
                 for b in blocks:
                     db.add(TextBlock(
                         page_id=p.id,

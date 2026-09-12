@@ -339,3 +339,32 @@ def test_merge_stacked_lines_keeps_separate_bubbles():
     assert len(merged) == 2
     assert merged[0][1] == "a1a2a3a4a5"
     assert merged[1][1] == "b1"
+
+
+def test_merge_horizontal_words_joins_same_line():
+    from app.pipeline.render import _merge_horizontal_words
+
+    # PaddleOCR splits a spaced Korean line into one box per word; same-line
+    # words share a vertical band + small horizontal gap and must join
+    # left-to-right, while a stacked line below stays separate.
+    boxes = [
+        ((524, 1255, 101, 52), "않아?", 1.0, 0.0),   # right word (sorted first by y)
+        ((450, 1256, 80, 50), "좋지", 1.0, 0.0),      # left word, same line
+        ((425, 1308, 231, 52), "도시사람들은", 0.97, 0.0),  # next line (stacked)
+    ]
+    merged = _merge_horizontal_words(boxes)
+    assert len(merged) == 2
+    assert merged[0][1] == "좋지 않아?"            # left-to-right, space-joined
+    assert merged[1][1] == "도시사람들은"          # different line stays separate
+
+
+def test_merge_horizontal_words_keeps_separate_bubbles():
+    from app.pipeline.render import _merge_horizontal_words
+
+    # Two side-by-side bubbles at the same y but far apart in x must NOT merge.
+    boxes = [
+        ((100, 500, 120, 50), "왼쪽", 1.0, 0.0),
+        ((500, 500, 120, 50), "오른쪽", 1.0, 0.0),  # ~280px gap -> separate bubble
+    ]
+    merged = _merge_horizontal_words(boxes)
+    assert len(merged) == 2
