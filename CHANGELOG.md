@@ -2,6 +2,25 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.3] - 2026-09-15
+
+### Fixed
+- **Box merging snowballed into a page-swallowing block.** `_merge_stacked_lines`
+  tested the vertical gap against the block's *accumulated union* box — and the
+  union's height grows with every merge, so the `0.6 * min(h, bh)` threshold
+  inflated and admitted ever-more-distant boxes. On job-2 page 115 four bubble
+  lines plus three unrelated art misreads chained into ONE **575×1417** block
+  covering most of the page; erasing it wiped the artwork, and the English landed
+  across the wash. Adjacency is now tested against each **member** box, which
+  bounds every merge to geometry that genuinely adjoins the bubble. Measured on
+  the real page: the bubble block is now 219×220 (was 575×1417).
+- **The same bug was hiding art misreads from the confidence filter.** Merging
+  takes `max(conf)` of its members, so the low-confidence art misreads rode the
+  bubble's 1.0 confidence and survived `_drop_low_confidence` (0.5 floor) — `'N'`
+  (conf 0.395) + `'oyloo!'` (0.434) became part of a 1.0-confidence block. With
+  them no longer merged in, they form their own 0.434 block and are dropped, so
+  the nonsense that was lettered over the artwork is gone too.
+
 ## [0.27.2] - 2026-09-15
 
 ### Fixed

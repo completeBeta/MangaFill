@@ -362,6 +362,22 @@ def _merge_horizontal_words(boxes: list) -> list:
     return out
 
 
+def _stack_adjacent(a: tuple, b: tuple) -> bool:
+    """True if box `a` sits directly above/below box `b` as the next line of the
+    same speech box (horizontally overlapping column, small vertical gap).
+
+    Used instead of comparing against a growing union bbox: see
+    `_merge_stacked_lines` for the page-115 snowball this prevents.
+    """
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    x_overlap = min(ax + aw, bx + bw) - max(ax, bx)
+    if x_overlap <= 0.3 * min(aw, bw):
+        return False  # different column — never merge across a horizontal gap
+    gap = ay - (by + bh) if ay >= by else by - (ay + ah)
+    return gap <= 0.6 * min(ah, bh)  # adjacent (or overlapping) lines
+
+
 def _merge_stacked_lines(boxes: list) -> list:
     """Merge vertically-stacked OCR line fragments into single blocks.
 
@@ -381,10 +397,6 @@ def _merge_stacked_lines(boxes: list) -> list:
         placed = False
         for blk in reversed(blocks):
             bx, by, bw, bh = blk["bbox"]
-            x_overlap = min(x + w, bx + bw) - max(x, bx)
-            if x_overlap <= 0.3 * min(w, bw):
-                continue  # different column — never merge across a horizontal gap
-            y_gap = y - (by + bh)
             # A nested/duplicate detection (the same text region OCR'd twice,
             # or a sub-region of an already-seen block) sits almost ENTIRELY
             # inside the block — near-full containment. A tilted multi-line
@@ -394,13 +406,22 @@ def _merge_stacked_lines(boxes: list) -> list:
             # partial overlap (an adjacent line of the same tilted bubble).
             if _box_containment((x, y, w, h), (bx, by, bw, bh)) > 0.9:
                 continue  # nested/duplicate detection — not a distinct line
-            if y_gap > 0.6 * min(h, bh):
-                continue  # separate bubble below (visible gap)
+            # Test adjacency against each MEMBER box, never against the
+            # accumulated union. The union's height grows with every merge, so a
+            # union-derived `0.6 * min(h, bh)` threshold inflates and admits
+            # ever-more-distant boxes — a snowball that swallowed a whole page
+            # (job-2 page 115: four bubble lines plus three unrelated art
+            # misreads chained into ONE 575x1417 block, and erasing that box
+            # wiped the artwork behind them). Per-member gaps bound every merge
+            # to geometry that genuinely adjoins the bubble.
+            if not any(_stack_adjacent((x, y, w, h), m) for m in blk["members"]):
+                continue  # not adjacent to any line already in this block
             nx = min(bx, x)
             ny = min(by, y)
             nx2 = max(bx + bw, x + w)
             ny2 = max(by + bh, y + h)
             blk["bbox"] = (nx, ny, nx2 - nx, ny2 - ny)
+            blk["members"].append((x, y, w, h))
             blk["text"] += text
             blk["conf"] = max(blk["conf"], conf)
             blk["aw"] += angle * w  # width-weighted slant accumulator
@@ -409,7 +430,7 @@ def _merge_stacked_lines(boxes: list) -> list:
             break
         if not placed:
             blocks.append({"bbox": (x, y, w, h), "text": text, "conf": conf,
-                           "aw": angle * w, "ww": w})
+                           "aw": angle * w, "ww": w, "members": [(x, y, w, h)]})
     # Reading order: top-to-bottom, then left-to-right.
     blocks.sort(key=lambda b: (b["bbox"][1], b["bbox"][0]))
     return [(b["bbox"], b["text"], b["conf"], b["aw"] / b["ww"]) for b in blocks]

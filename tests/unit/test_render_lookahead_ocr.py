@@ -105,6 +105,53 @@ def test_custom_recognizer_is_used_for_both_passes():
     assert seen == [(200, 400), (200, 300)]
 
 
+# ---------------------------------------------------------------- merge snowball
+
+def test_multiline_bubble_still_merges():
+    """A four-line bubble must still become one block (the normal case)."""
+    boxes = [
+        ((416, 33, 100, 62), "아니,", 0.99, 0.0),
+        ((369, 91, 196, 53), "그렇다기엔", 0.99, 0.0),
+        ((357, 141, 219, 60), "너무생긴게", 0.99, 0.0),
+        ((359, 194, 216, 59), "멀쩡한데?", 0.99, 0.0),
+    ]
+    out = render._merge_stacked_lines(boxes)
+    assert len(out) == 1
+    assert out[0][1] == "아니,그렇다기엔너무생긴게멀쩡한데?"
+
+
+def test_distant_box_is_not_swept_into_a_bubble():
+    """job-2 page 115: a growing union let three art misreads chain onto the bubble.
+
+    After the four lines merged, the union was 220 px tall, so the union-derived
+    gap test (0.6 * min(498, 220) = 132) admitted an art misread sitting 73 px
+    below it — and then that box's own 498 px height admitted the next, ending in
+    ONE 575x1417 block whose erase wiped the page's artwork. Measured gaps here
+    are the real ones from that page; only the union rule merges them.
+    """
+    bubble = [
+        ((416, 33, 100, 62), "아니,", 0.99, 0.0),
+        ((369, 91, 196, 53), "그렇다기엔", 0.99, 0.0),
+        ((357, 141, 219, 60), "너무생긴게", 0.99, 0.0),
+        ((359, 194, 216, 59), "멀쩡한데?", 0.99, 0.0),
+    ]
+    noise = [((21, 326, 462, 498), "N", 0.9, 0.0)]
+    out = render._merge_stacked_lines(bubble + noise)
+    assert len(out) == 2, f"art misread was absorbed: {out}"
+    texts = sorted(t for _b, t, _c, _a in out)
+    assert texts == ["N", "아니,그렇다기엔너무생긴게멀쩡한데?"]
+    # the bubble block must not have grown into the artwork
+    blk = [b for b, t, _c, _a in out if t.startswith("아니")][0]
+    assert blk[3] < 260, f"bubble block sprawled to height {blk[3]}"
+
+
+def test_stack_adjacent_rejects_other_columns():
+    a = ((10, 100, 50, 20), "", 0.0, 0.0)
+    assert render._stack_adjacent((10, 130, 50, 20), a[0])      # next line
+    assert not render._stack_adjacent((300, 130, 50, 20), a[0])  # other column
+    assert not render._stack_adjacent((10, 400, 50, 20), a[0])   # far below
+
+
 def test_no_lookahead_is_a_single_native_call(monkeypatch):
     fake, calls = _fake_ocr({400: [((10, 10, 50, 20), "PAGE", 0.99, 0.0)]})
     monkeypatch.setattr(render, "remote_ocr_multilingual", fake)
