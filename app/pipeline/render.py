@@ -207,6 +207,15 @@ def _ocr_ko_zh_native(page_image, page_np, lookahead, worker_url, lang: str,
     `ocr_fn(image, lang)` is the recognizer used for both passes (defaults to the
     GPU worker; the local PP-OCR fallback passes `read_boxes_text`) — both paths
     were handed the stitched image before this and both degraded the same way.
+
+    The band is rescaled so its LONG side matches the page's long side. PaddleOCR's
+    recognition is size-sensitive, not just aspect-sensitive: the raw 690x1000
+    join is read as garbage by BOTH backends ('이 위아래로' -> '래러이ㅎ',
+    conf 0.999 -> 0.670 — measured; the same pixels inside the 690x1600 page read
+    cleanly). Matching the page's own resolution puts the glyphs back in the size
+    range the recognizer handles, and is verified to keep the straddling-bubble
+    reading that the band exists for (page 23, whose bubble is invisible to the
+    page pass, still reads correctly).
     """
     call = ocr_fn or (lambda img, lg: remote_ocr_multilingual(img, worker_url, lg))
     boxes = call(page_image, lang)
@@ -217,10 +226,17 @@ def _ocr_ko_zh_native(page_image, page_np, lookahead, worker_url, lang: str,
     if band <= 0:
         return boxes
     joined = np.vstack([page_np[page_h - band:], lookahead[:band]])
+    sc = page_h / joined.shape[0]
+    if abs(sc - 1.0) > 0.01:
+        joined_img = Image.fromarray(joined).resize(
+            (max(1, int(round(joined.shape[1] * sc))), page_h), Image.LANCZOS)
+        inv = 1.0 / sc
+    else:
+        joined_img, inv = Image.fromarray(joined), 1.0
     off = page_h - band
     band_boxes = [
-        ((x, y + off, w, h), text, conf, angle)
-        for (x, y, w, h), text, conf, angle in call(Image.fromarray(joined), lang)
+        ((x * inv, y * inv + off, w * inv, h * inv), text, conf, angle)
+        for (x, y, w, h), text, conf, angle in call(joined_img, lang)
     ]
     kept = [b for b in boxes if b[0][1] < off]
     kept = _band_handover(kept, band_boxes, page_h)

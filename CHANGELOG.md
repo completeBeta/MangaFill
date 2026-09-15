@@ -2,6 +2,28 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.4] - 2026-09-15
+
+### Fixed
+- **The boundary band was misrecognised, silently replacing correct text with
+  garbage.** v0.27.1's band is the page's last 500 px joined to the next page's
+  first 500 px — a 690×1000 image. PaddleOCR's recognition is *size*-sensitive,
+  not merely aspect-sensitive, and that geometry is a bad size: the same pixels
+  read inside the 690×1600 page come back as nonsense from the 690×1000 join, on
+  **both** the GPU worker and the CPU fallback (so it wasn't a backend issue):
+
+  | what OCR'd it | reading of the bubble |
+  |---|---|
+  | page alone (690×1600) | `이` `위아래로` `전부` `사유지야.` — conf 0.93–1.00 |
+  | band, raw join (690×1000) | `10` `래러이ㅎ` `이` — **garbage** |
+
+  Because the band's reading *replaced* the page's correct one for every box in
+  the band (`_band_handover`), a clean bubble became "10 LARRY, HEH." (job-2 page
+  68). The band is now rescaled so its long side matches the page's long side,
+  which puts the glyphs back in the size range the recognizer handles. Verified
+  the straddling-bubble case the band exists for still works (job-2 page 23's
+  bubble is invisible to the page pass and still reads correctly).
+
 ## [0.27.3] - 2026-09-15
 
 ### Fixed
