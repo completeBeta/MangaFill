@@ -28,6 +28,17 @@ from PIL import Image
 
 from .language import has_hangul, has_hanzi, has_kana
 
+# Unicode ranges for the script-counting probes in `detect_language`.
+_HIRAGANA = (0x3040, 0x309F)
+_KATAKANA = (0x30A0, 0x30FF)
+_HANGUL = (0xAC00, 0xD7AF)
+_HANZI = (0x4E00, 0x9FFF)
+
+
+def _count(text: str, *ranges) -> int:
+    """Count characters falling inside any of the given (lo, hi) Unicode ranges."""
+    return sum(1 for ch in text if any(lo <= ord(ch) <= hi for lo, hi in ranges))
+
 # PaddleOCR language codes for the source languages we OCR here (ja stays on
 # manga-ocr, but `ch` doubles as the CJK probe in `detect_language` because it
 # reads Japanese kanji+kana too).
@@ -211,43 +222,45 @@ def drop_all_pipelines() -> None:
 def detect_language(image: Image.Image) -> str:
     """Auto-detect the source language (ja/ko/zh) from a page.
 
-    PaddleOCR's recognition is per-script: `ch` reads hanzi AND kana (Chinese
-    and Japanese share one model); `korean` reads hangul only. On the wrong
-    script a model emits garbage at ~0.0 confidence, so:
+    Only HANGUL and KANA are positive script markers:
+      * the `korean` recognizer emits hangul ONLY for hangul, and
+      * the `ch` recognizer emits kana only for Japanese,
+      * but the `ch` recognizer happily reads Korean (and noise) as plausible
+        HANZI at decent confidence — so "hanzi is present" is NOT evidence of
+        Chinese. 2026-09-15: job 2 (a Korean manhwa) auto-detected as **zh**, and
+        because the Chinese recognizer then read nothing the whole page came back
+        untranslated — silently overwriting already-translated pages.
 
-      * `ch` output carries kana (a Japanese-only marker)      -> Japanese
-      * else `ch` output is hanzi without kana, read confidently-> Chinese
-      * else `korean` output carries hangul, read confidently   -> Korean
-      * no signal (blank / already-English page)                -> Japanese
-        (the manga-ocr path, whose `_has_japanese` filter drops English).
+    So: probe `ch`; a real kana count means Japanese. Otherwise probe `korean` and
+    let HANGUL WIN over hanzi. Measured on the real pages:
 
-    `ch` is probed FIRST — one pass classifies both CJK scripts — and `korean`
-    is probed only when `ch` finds no CJK. This avoids running the korean
-    recognizer on dense Chinese/Japanese pages, where its language-agnostic
-    detection floods the page with hundreds of false-positive boxes and wedges
-    the memory-constrained host (4 GB, no swap) — the `source_lang=auto` hang.
+        page            ch probe                      ko probe
+        job2 p1 (ko)    hanzi+, no kana               hangul 20, hanzi 0, conf .96
+        job2 p2 (ko)    kana 1 (!) + hanzi 2           hangul 16, hanzi 0, conf .84
+        job3 p1 (zh)    hanzi 58, conf .998            hangul 0  (punctuation only)
 
-    Done once per job on the first page and cached for the whole run. The
-    unneeded pipeline is dropped afterwards so we hold only the winning
-    recognizer for the rest of the job, not both.
+    Note the single stray kana on a Korean page: one character must never decide,
+    hence the `>= 2` floors. Done once per job on the first page.
     """
     ch_boxes = read_boxes_text(image, "ch")
     ch_text = "".join(t for _b, t, _c, _a in ch_boxes)
     ch_conf = _avg_conf(ch_boxes)
 
-    if has_kana(ch_text):
+    if _count(ch_text, _HIRAGANA, _KATAKANA) >= 2:
         _drop("ch")  # ja routes to manga-ocr, not PaddleOCR
         return "ja"
-    if has_hanzi(ch_text) and ch_conf > 0.4:
-        return "zh"  # keep the ch recognizer for the job
 
-    # No CJK signal: blank / already-English page, or Korean (ch can't read
-    # hangul). Only now pay for the korean recognizer.
-    _drop("ch")
+    # No solid Japanese signal — Korean is the only remaining positive marker.
     ko_boxes = read_boxes_text(image, "ko")
     ko_text = "".join(t for _b, t, _c, _a in ko_boxes)
     ko_conf = _avg_conf(ko_boxes)
-    _drop("ko")
-    if has_hangul(ko_text) and ko_conf > 0.4:
+    if _count(ko_text, _HANGUL) >= 2 and ko_conf > 0.4:
+        _drop("ch")  # korean wins — free the ch model
         return "ko"
+    _drop("ko")      # korean loses — free it, keep ch for the Chinese path
+
+    if _count(ch_text, _HANZI) >= 2 and ch_conf > 0.4:
+        return "zh"  # keep the ch recognizer for the job
+
+    _drop("ch")      # blank / already-English page -> manga-ocr path
     return "ja"

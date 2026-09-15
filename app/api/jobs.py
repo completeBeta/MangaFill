@@ -5,12 +5,12 @@ import os
 import zipfile
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Job, Page
+from app.models import Job, Page, TextBlock
 from app.services.job_engine import (
     _delete_job_files,
     _job_dir,
@@ -119,17 +119,125 @@ def clear_all(db: Session = Depends(get_db)):
 
 @router.post("/{job_id}/start")
 def start_job(job_id: int, db: Session = Depends(get_db)):
-    """Resume a paused job, or retry a cancelled/failed one."""
+    """Resume a job — re-queue it and retry every page that isn't finished.
+
+    Accepts paused/cancelled/failed/partial **and** done: a job that finished
+    "partial" (some pages failed, e.g. a provider outage) or a job whose pages
+    you want retried after a pipeline fix can all be resumed. The engine skips
+    pages already marked `done`, so only unfinished work is redone — a Resume
+    never re-renders finished pages. Pages left `running` by a crash are reset
+    first so the worker re-claims them.
+    """
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
-    if job.status in ("paused", "cancelled", "failed"):
+    if job.status in ("paused", "cancelled", "failed", "partial", "done"):
+        for p in db.query(Page).filter(
+            Page.job_id == job_id, Page.status.in_(("running", "failed", "pending"))
+        ).all():
+            p.status = "pending"
+            p.error = None
         job.status = "queued"
         job.error = None
         job.finished_at = None
         job.updated_at = _now()
         db.commit()
-    return _job_dict(job)
+    return _job_dict(job, with_pages=True)
+
+
+@router.post("/{job_id}/rerender")
+def rerender_pages(job_id: int, payload: dict | None = Body(None), db: Session = Depends(get_db)):
+    """Re-render pages of a job with the current pipeline — all of them, or a set.
+
+    Body (optional): ``{"indices": [3, 7]}`` to redo specific pages; omit it (or
+    send an empty list) to redo EVERY page. Use after a pipeline fix to apply it
+    to pages produced by older code, since a normal Resume skips pages already
+    marked `done`.
+
+    Resetting several pages in ONE request matters: a per-page call queues the job
+    and the worker claims it within a second, so a burst of per-page calls races
+    the runner (the later ones get 409 "job is running"). This endpoint resets the
+    whole set before the job is queued, so one run re-renders all of them.
+
+    Token/cost totals are left alone (they record real spend); `pages_done` /
+    `blocks_found` / `blocks_ok` have the redone pages' contribution subtracted
+    first, because the engine adds them again as each page completes.
+    """
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if job.status == "running":
+        raise HTTPException(409, "job is running — pause or stop it first")
+
+    indices = (payload or {}).get("indices") or None
+    q = db.query(Page).filter(Page.job_id == job_id)
+    if indices:
+        try:
+            wanted = [int(i) for i in indices]
+        except (TypeError, ValueError):
+            raise HTTPException(400, "indices must be a list of page numbers")
+        pages = q.filter(Page.index.in_(wanted)).all()
+        if len(pages) != len(set(wanted)):
+            raise HTTPException(404, "one or more pages not found")
+    else:
+        pages = q.all()
+
+    for p in pages:
+        if p.status == "done":
+            if job.pages_done > 0:
+                job.pages_done -= 1
+            old = db.query(TextBlock).filter(TextBlock.page_id == p.id).all()
+            job.blocks_found = max(0, job.blocks_found - len(old))
+            job.blocks_ok = max(0, job.blocks_ok - sum(1 for b in old if (b.en_text or "").strip()))
+        p.status = "pending"
+        p.error = None
+
+    job.status = "queued"
+    job.error = None
+    job.finished_at = None
+    job.updated_at = _now()
+    db.commit()
+    return {"ok": True, "pages_queued": len(pages),
+            "indices": sorted(p.index for p in pages)}
+
+
+@router.post("/{job_id}/pages/{index}/rerender")
+def rerender_page(job_id: int, index: int, db: Session = Depends(get_db)):
+    """Re-render a SINGLE page with the current pipeline, leaving the rest alone.
+
+    Resets just this page and re-queues the job; the engine skips every page still
+    marked `done`, so only this one is rendered again. Use it after a pipeline fix
+    to apply that fix to pages produced by the older code — far cheaper than
+    re-running the whole job (and it re-spends tokens for this page only).
+
+    Counters are kept honest: a page that had already contributed to
+    `pages_done` / `blocks_found` / `blocks_ok` is subtracted first, because the
+    engine adds them again when the page is redone.
+    """
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    p = db.query(Page).filter(Page.job_id == job_id, Page.index == index).first()
+    if p is None:
+        raise HTTPException(404, "page not found")
+    if job.status == "running":
+        raise HTTPException(409, "job is running — pause or stop it first")
+
+    if p.status == "done":
+        if job.pages_done > 0:
+            job.pages_done -= 1
+        old = db.query(TextBlock).filter(TextBlock.page_id == p.id).all()
+        job.blocks_found = max(0, job.blocks_found - len(old))
+        job.blocks_ok = max(0, job.blocks_ok - sum(1 for b in old if (b.en_text or "").strip()))
+
+    p.status = "pending"
+    p.error = None
+    job.status = "queued"
+    job.error = None
+    job.finished_at = None
+    job.updated_at = _now()
+    db.commit()
+    return {"ok": True, "job": _job_dict(job), "page": index}
 
 
 @router.post("/{job_id}/pause")

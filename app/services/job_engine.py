@@ -262,6 +262,17 @@ def process_job(job_id: int) -> None:
                 # Clear any rows from a prior run of this page first, so a
                 # re-render replaces them instead of accumulating stale
                 # duplicate blocks (which pollute the viewer and overlap scans).
+                prev_blocks = db.query(TextBlock).filter(TextBlock.page_id == p.id).count()
+                if not blocks and prev_blocks:
+                    # A re-render that suddenly finds NO text where the previous run
+                    # found some is almost always a mis-detection (wrong source
+                    # language, dead GPU worker) — and it has just overwritten a
+                    # translated page with the untranslated original. Say so loudly
+                    # instead of finishing silently "done".
+                    log.error("job %s page %d rendered 0 blocks but previously had %d — the "
+                              "page was overwritten with the UNTRANSLATED original; check the "
+                              "source-language setting, the GPU worker, and the provider",
+                              job_id, p.index, prev_blocks)
                 db.query(TextBlock).filter(TextBlock.page_id == p.id).delete()
                 for b in blocks:
                     db.add(TextBlock(

@@ -1,9 +1,16 @@
 """Unit tests for multi-language OCR routing + language detection.
 
 `detect_language` and `_reocr_rotated` are tested with `read_boxes_text` /
-`_pipeline` mocked — no PaddleOCR model load. The key regression guard: the
-`source_lang=auto` hang fix means the korean recognizer is NEVER probed on a
-Chinese/Japanese page (only `ch`, which reads hanzi AND kana, is run first).
+`_pipeline` mocked — no PaddleOCR model load.
+
+The key regression guards:
+  * a real KANA count means Japanese (the ch probe alone decides — no korean probe);
+  * otherwise the korean probe runs, and HANGUL BEATS HANZI. The ch recognizer
+    reads Korean as plausible hanzi, so "hanzi present" must never decide on its
+    own: job 2 (a Korean manhwa) auto-detected as `zh` on 2026-09-15 and the
+    Chinese recognizer then read nothing, silently re-rendering pages back to
+    their untranslated originals;
+  * one stray kana character must not flip a Korean page to Japanese.
 """
 from __future__ import annotations
 
@@ -17,20 +24,60 @@ def _img(w: int = 10, h: int = 10) -> Image.Image:
     return Image.new("RGB", (w, h))
 
 
-def test_detect_language_chinese_probes_ch_only(monkeypatch):
-    """A Chinese page classifies from the `ch` probe alone — the korean
-    recognizer (whose detection floods dense CJK pages with false positives)
-    is never loaded."""
+def test_detect_language_chinese_rules_out_korean_then_returns_zh(monkeypatch):
+    """A Chinese page is probed with `ch` AND `ko`.
+
+    The korean probe is no longer skipped: hangul is the only positive Korean
+    marker, and it has to be checked before hanzi can be trusted (see the
+    job-2 mis-detection below). Measured on the real page, the korean model
+    emits no hangul for Chinese text, so the answer is still Chinese.
+    """
     calls: list[str] = []
 
     def fake_read(image, lang):
         calls.append(lang)
-        return [((0, 0, 30, 20), "你好世界", 0.95, 0.0)] if lang == "ch" else []
+        if lang == "ch":
+            return [((0, 0, 30, 20), "你好世界", 0.95, 0.0)]
+        # the real ko probe on a Chinese page: punctuation junk, zero hangul
+        return [((0, 0, 30, 20), "—3!!,*", 0.79, 0.0)]
 
     monkeypatch.setattr(om, "read_boxes_text", fake_read)
     monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
     assert om.detect_language(_img()) == "zh"
-    assert calls == ["ch"]
+    assert calls == ["ch", "ko"]
+
+
+def test_detect_language_korean_page_with_hanzi_garbage_is_korean(monkeypatch):
+    """THE 2026-09-15 BUG: the ch recognizer read a Korean page as hanzi.
+
+    Job 2 auto-detected as `zh` and every page came back untranslated (the
+    Chinese recognizer finds nothing in hangul), silently overwriting already
+    translated pages. Hangul from the korean probe must win over that garbage.
+    """
+    def fake_read(image, lang):
+        if lang == "ch":
+            return [((0, 0, 30, 20), "1T2 2卫 M亡ユ0.", 0.70, 0.0)]  # garbage hanzi
+        return [((0, 0, 30, 20), "한경백화점대한민국 매출 규모", 0.96, 0.0)]
+
+    monkeypatch.setattr(om, "read_boxes_text", fake_read)
+    monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
+    assert om.detect_language(_img()) == "ko"
+
+
+def test_detect_language_ignores_a_single_stray_kana(monkeypatch):
+    """One stray kana must not flip a Korean page to Japanese.
+
+    The real ch probe on job-2 page 2 returned exactly one katakana (ユ) amid
+    garbage; the old `has_kana(...) > 0` test would have called that Japanese.
+    """
+    def fake_read(image, lang):
+        if lang == "ch":
+            return [((0, 0, 30, 20), "1T2 2卫 M亡ユ0.", 0.70, 0.0)]  # 1 katakana
+        return [((0, 0, 30, 20), "뒤ㄹ말니고 씨는그야말로고급화의 상징.", 0.84, 0.0)]
+
+    monkeypatch.setattr(om, "read_boxes_text", fake_read)
+    monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
+    assert om.detect_language(_img()) == "ko"
 
 
 def test_detect_language_japanese_probes_ch_only(monkeypatch):

@@ -177,6 +177,113 @@ def _split_bullet_lines(blocks: list[TextBlock]) -> list[TextBlock]:
     return out
 
 
+# How much of the next page's top edge to sample when reading a bubble that
+# straddles the page cut (webtoon slicers cut at arbitrary heights).
+LOOKAHEAD_BAND = 500
+
+
+def _ocr_ko_zh_native(page_image, page_np, lookahead, worker_url, lang: str,
+                      band: int = LOOKAHEAD_BAND, ocr_fn=None) -> list:
+    """OCR a Korean/Chinese page at NATIVE scale, boundary bubble included.
+
+    PaddleOCR downsizes whatever image it is handed (long side to ~960 px), so
+    OCRing a page with the lookahead strip stitched onto it shrinks the effective
+    glyph height and the recognizer degrades into garbage syllables. Measured on
+    job-2 page 77: the same line reads '현성아!' at native scale (conf 0.999) but
+    '야워을' with a 500 px strip attached (conf 0.609); the page's clean 7 boxes
+    came back as 6 nonsense ones, which the pipeline then translated, erased and
+    lettered — and because the garbage boxes only partly covered the real text,
+    the Korean stayed on the page with English drawn over it.
+
+    Fix: OCR the page alone, then OCR only the boundary BAND (the page's last
+    `band` rows joined to the next page's first `band` rows) as its own image —
+    2×band tall, so it too stays near native scale — and map the band's boxes
+    back into page coordinates. Boxes living entirely inside the band are dropped
+    from the page pass in favour of the band's reading; lines that merely straddle
+    the band's top edge keep the page's fuller reading (the existing dedup drops
+    the band's partial copy). A bubble spanning the cut is therefore read whole,
+    which is what the strip was for.
+
+    `ocr_fn(image, lang)` is the recognizer used for both passes (defaults to the
+    GPU worker; the local PP-OCR fallback passes `read_boxes_text`) — both paths
+    were handed the stitched image before this and both degraded the same way.
+    """
+    call = ocr_fn or (lambda img, lg: remote_ocr_multilingual(img, worker_url, lg))
+    boxes = call(page_image, lang)
+    if lookahead is None or lookahead.shape[1] != page_image.width:
+        return boxes
+    page_h = page_image.height
+    band = min(band, page_h, lookahead.shape[0])
+    if band <= 0:
+        return boxes
+    joined = np.vstack([page_np[page_h - band:], lookahead[:band]])
+    off = page_h - band
+    band_boxes = [
+        ((x, y + off, w, h), text, conf, angle)
+        for (x, y, w, h), text, conf, angle in call(Image.fromarray(joined), lang)
+    ]
+    kept = [b for b in boxes if b[0][1] < off]
+    if len(kept) != len(boxes):
+        print(f"[ocr] native={len(boxes)} -> {len(kept)} after band handover, "
+              f"band={len(band_boxes)} (offset {off})")
+    return kept + band_boxes
+
+
+def _merge_blocks_per_bubble(blocks: list, bubbles: list) -> list:
+    """Merge blocks that resolve to the SAME speech bubble into one block.
+
+    A multi-line bubble can come back as several OCR blocks (one per line, or a
+    line fragment that also swallowed a neighbouring SFX). Each resolves to the
+    same parent bubble, and the typesetter centres BOTH into it — lettering
+    English on top of English. Measured on job-2 page 34: 'CAN YOU HEAR ME?'
+    drawn straight through 'L-SENBAE! SENBAE!' inside one hexagon bubble. Merging
+    the blocks before translation fixes both the lettering collision and the
+    translation (the bubble goes to the LLM as one unit instead of half a line
+    at a time). Only blocks with a real parent bubble are grouped — free-floating
+    text (stat columns, captions) has no bubble and is never merged here.
+    """
+    if len(blocks) <= 1 or not bubbles:
+        return blocks
+    grouped: dict = {}
+    for b in blocks:
+        parent = find_parent_bubble(bubbles, b.bbox)
+        if parent is None:
+            continue
+        grouped.setdefault(tuple(parent), []).append(b)
+    if not any(len(v) > 1 for v in grouped.values()):
+        return blocks
+    merged: list = []
+    consumed: set = set()
+    for b in blocks:
+        if id(b) in consumed:
+            continue
+        parent = find_parent_bubble(bubbles, b.bbox)
+        if parent is None:
+            merged.append(b)
+            continue
+        key = tuple(parent)
+        members = grouped.get(key) or [b]
+        if len(members) == 1:
+            merged.append(b)
+            continue
+        for m in members:
+            consumed.add(id(m))
+        members = sorted(members, key=lambda m: (m.bbox[1], m.bbox[0]))
+        x0 = min(m.bbox[0] for m in members)
+        y0 = min(m.bbox[1] for m in members)
+        x1 = max(m.bbox[0] + m.bbox[2] for m in members)
+        y1 = max(m.bbox[1] + m.bbox[3] for m in members)
+        base = members[0]
+        text = " ".join(m.text for m in members if m.text)
+        print(f"[bubble] merged {len(members)} blocks in one bubble -> "
+              f"{text[:60]!r}")
+        merged.append(TextBlock(bbox=(x0, y0, x1 - x0, y1 - y0), text=text,
+                                confidence=base.confidence,
+                                orientation=base.orientation, angle=base.angle))
+    merged.sort(key=lambda b: (b.bbox[1], b.bbox[0]))
+    return merged
+
+
 def _merge_horizontal_words(boxes: list) -> list:
     """Merge side-by-side word fragments on one line into a single box.
 
@@ -313,21 +420,86 @@ def _overlaps_any(bbox: tuple, boxes: list[tuple]) -> bool:
     return any(_box_containment(bbox, q) > 0.5 or _iou(bbox, q) > 0.5 for q in boxes)
 
 
+def _intersects(a: tuple, b: tuple) -> bool:
+    """True if two (x, y, w, h) boxes overlap at all.
+
+    Stricter than `_overlaps_any` (which needs >50% containment or IoU): a
+    carryover patch can clip the corner of a bubble this page owns — ~45%
+    containment — and pasting it there still corrupts the lettering.
+    """
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return (min(ax + aw, bx + bw) > max(ax, bx)) and (min(ay + ah, by + bh) > max(ay, by))
+
+
 def _paste_carryover(result_np: np.ndarray, carryover: list) -> np.ndarray:
     """Paste carryover patches (a previous page's bubble bottom halves) onto a
     rendered page array. Each entry is ``(patch, (x, y, w, h))`` in this page's
-    coordinates."""
+    coordinates.
+
+    The caller must already have dropped patches that land on text THIS page
+    owns (see the carryover filter in `render_translated_page`) — stamping a
+    previous page's pixels over freshly lettered text corrupts it.
+    """
     out = result_np.copy()
     for patch, (cx, cy, cw, ch) in carryover:
         out[cy:cy + ch, cx:cx + cw] = patch
     return out
 
 
+def _drop_spurious_carryover(carryover: list, blocks: list) -> list:
+    """Drop carryover patches that overlap text THIS page owns.
+
+    A previous page's target region can bleed across the boundary and clip a
+    bubble this page is about to letter. Pasting that patch would stamp old
+    (source-bearing) pixels over the fresh lettering — the 2026-09-15 job-2
+    page-41 defect, where page 40's patch carried '하고' back over page 41's
+    clean "I'M RETIRING". Uses `_intersects` (any overlap), not `_overlaps_any`:
+    that defect was only ~45% containment, which `_overlaps_any` ignores.
+    """
+    own = [b.bbox for b in blocks]
+    return [c for c in (carryover or []) if not any(_intersects(tuple(c[1]), ob) for ob in own)]
+
+
+def _free_text_region(bbox: tuple, page_w: int, page_h: int) -> tuple:
+    """Typeset region for free-floating text with no enclosing speech box.
+
+    English is HORIZONTAL, so a tall-narrow source box (Japanese tategaki
+    narration, a vertical caption column over artwork) must not set the lettering
+    width — fitting a long English line into a ~1-glyph-wide column produces
+    microscopic text. Only tall-narrow text gets the wide strip; wide footnotes
+    and small labels keep their own width (see `_caption_region`).
+    """
+    return _caption_region(bbox, page_w, page_h) if bbox[3] > bbox[2] * 1.5 else bbox
+
+
+# A carryover patch only MEANS something if the previous page actually drew
+# lettering into the boundary strip. A region that straddles the cut but whose
+# English sat higher up yields a patch of bare inpainted background: pasting it
+# achieves nothing, while the matching erase box on the next page destroys text
+# there (2026-09-15 job-2 page 30 — a blank 196x83 patch erased the top of the
+# page's own `그날` narration and left a smudge). Rendered lettering has contrast;
+# bare inpaint does not (measured: blank 10.8 std vs real patches 49 / 72).
+_MIN_PATCH_STD = 20.0
+
+
+def _patch_is_blank(patch: np.ndarray) -> bool:
+    """True if a carryover patch carries no rendered lettering (bare background)."""
+    if patch is None or patch.size == 0:
+        return True
+    a = patch.astype(np.float32)
+    if a.ndim == 3:
+        a = a.mean(axis=2)
+    return float(a.std()) < _MIN_PATCH_STD
+
+
 def _extract_carryover(result_np: np.ndarray, targets: list, page_h: int) -> list:
     """Extract the below-boundary halves of bubbles that straddle `page_h`.
 
     Returns ``[(patch, (x, 0, w, h))]`` — each patch is the rendered bottom half
-    of a boundary bubble, in the NEXT page's coordinates (y shifted to 0)."""
+    of a boundary bubble, in the NEXT page's coordinates (y shifted to 0).
+    Blank patches are dropped — see `_patch_is_blank`.
+    """
     patches: list = []
     for _b, region in targets:
         if region is None:
@@ -336,7 +508,7 @@ def _extract_carryover(result_np: np.ndarray, targets: list, page_h: int) -> lis
         if ry < page_h < ry + rh:
             bottom = min(ry + rh, result_np.shape[0])
             patch = result_np[page_h:bottom, rx:rx + rw].copy()
-            if patch.size:
+            if patch.size and not _patch_is_blank(patch):
                 patches.append((patch, (rx, 0, rw, bottom - page_h)))
     return patches
 
@@ -557,6 +729,13 @@ def render_translated_page(
     # of this page lets detect/OCR see the WHOLE bubble. The below-boundary half
     # is carried to the next page (see the typeset/paste section) so the English
     # stays continuous when pages are re-stacked into the vertical scroll.
+    # `plain_np`/`plain_image` keep the NATIVE page (no strip) for OCR: PaddleOCR
+    # resizes its input internally, so handing it a page with the lookahead strip
+    # attached shrinks the effective glyph height and recognition collapses into
+    # garbage syllables (see `_ocr_ko_zh_native`). The stitched `image` is still
+    # used for blank-check, bubble detection, inpaint and typeset.
+    plain_np = image_np
+    plain_image = image
     if lookahead is not None and lookahead.shape[1] == page_w:
         image_np = np.vstack([image_np, lookahead])
         image = Image.fromarray(image_np)
@@ -576,12 +755,14 @@ def render_translated_page(
             try:
                 # Offload to the GPU worker (same PaddleOCR, run off the app's
                 # memory-constrained CPU); fall back to local on any failure.
-                boxes = remote_ocr_multilingual(image, gpu_worker_url, lang)
+                boxes = _ocr_ko_zh_native(plain_image, plain_np, lookahead,
+                                          gpu_worker_url, lang)
                 drop_all_pipelines()  # worker does the OCR now; free local models
             except Exception:
                 boxes = None
         if boxes is None:
-            boxes = read_boxes_text(image, lang)
+            boxes = _ocr_ko_zh_native(plain_image, plain_np, lookahead, None, lang,
+                                      ocr_fn=read_boxes_text)
         # Merge horizontally-adjacent word fragments (PaddleOCR splits a spaced
         # Korean line into one box per word — '좋지 않아?' -> '좋지' + '않아?')
         # into one box per line, then merge vertically-stacked lines into one
@@ -658,17 +839,40 @@ def render_translated_page(
         blocks = _drop_titles(blocks, page_h)
     blocks = _split_bullet_lines(blocks)
 
+    # One bubble must hold ONE string: several OCR blocks resolving to the same
+    # speech bubble would otherwise each be centred into it, lettering English
+    # over English (see `_merge_blocks_per_bubble`).
+    if lang in ("ko", "zh") and bubbles:
+        blocks = _merge_blocks_per_bubble(blocks, bubbles)
+
     # ---- boundary filtering (lookahead / carryover) --------------------------
     # Drop blocks that belong to the next page (entirely in the lookahead strip)
     # or that were already resolved by the previous page (their bottom half was
     # drawn there and carried over here as a paste patch).
+    #
+    # Text that lives in the lookahead strip is NOT lettered here — but it must
+    # still be ERASED. Otherwise it survives into this page's rendered strip, and
+    # `_extract_carryover` copies it into the patch handed to the next page, which
+    # then pastes its OWN source glyphs back on top of its freshly lettered text.
+    # (2026-09-15 job-2 page 41: page 40's region overlapped the boundary, so the
+    # patch carried '하고' back over page 41's clean "I'M RETIRING".)
+    strip_erase: list[tuple] = []
     if lookahead is not None or carryover:
         carryover_boxes = [tuple(c[1]) for c in (carryover or [])]
-        blocks = [
-            b for b in blocks
-            if not (lookahead is not None and b.bbox[1] >= page_h)
-            and not _overlaps_any(b.bbox, carryover_boxes)
-        ]
+        kept: list[TextBlock] = []
+        for b in blocks:
+            if lookahead is not None and b.bbox[1] >= page_h:
+                strip_erase.append(b.bbox)  # next page's text — erase, don't letter
+                continue
+            if _overlaps_any(b.bbox, carryover_boxes):
+                continue  # already lettered by the previous page's patch
+            kept.append(b)
+        blocks = kept
+
+        # A carryover patch that overlaps text THIS page owns is spurious — the
+        # previous page's region bled across the boundary. Pasting it would stamp
+        # old (source-bearing) pixels over the lettering drawn below, so drop it.
+        carryover = _drop_spurious_carryover(carryover, blocks)
 
     # ---- translate (cloud LLM) ----------------------------------------------
     if dry_run:
@@ -746,15 +950,16 @@ def render_translated_page(
                 # that's what stacked the two-column stat tables on top of each other).
                 region = b.bbox
             else:
-                region = find_parent_bubble(bubbles, b.bbox)
-                if region is not None:
+                parent = find_parent_bubble(bubbles, b.bbox)
+                if parent is not None:
                     # Inset the bubble's bounding box to approximate its inscribed
                     # rectangle — ovals/spiked bubbles are narrower at the edges, so
                     # fitting text to the full bbox spills over the outline.
-                    region = _inset_box(region)
+                    region = _inset_box(parent)
                 else:
-                    # Free text / caption: no bubble edge to avoid — use its own box.
-                    region = b.bbox
+                    # Free text / caption: no bubble edge to avoid (see
+                    # `_free_text_region` for the tall-narrow widening rule).
+                    region = _free_text_region(b.bbox, page_w, page_h)
             targets.append((b, region))
             erase.append(b.bbox)
     else:
@@ -775,6 +980,12 @@ def render_translated_page(
     # pasted English patch never sits on un-erased source text.
     for _patch, cbox in (carryover or []):
         erase.append(tuple(cbox))
+    # Erase the NEXT page's text that the lookahead strip pulled in. It is never
+    # lettered here, but leaving it un-erased lets `_extract_carryover` copy those
+    # source glyphs into the patch handed to the next page (see the boundary
+    # filter above). Cropped away from this page's own output, so purely a cleanup.
+    for box in strip_erase:
+        erase.append(tuple(int(v) for v in box))
     if erase:
         emit("inpaint")
         if gpu_worker_url:

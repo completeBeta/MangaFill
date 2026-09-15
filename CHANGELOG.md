@@ -2,6 +2,97 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.1] - 2026-09-15
+
+### Fixed
+- **The lookahead strip was destroying Korean/Chinese OCR.** For webtoons the
+  renderer stitches the next page's top 500 px onto the page before OCR, so a
+  bubble cut by the page boundary is read whole. PaddleOCR however *downsizes
+  whatever image it is handed* (long side to ~960 px), so the taller stitched
+  image shrank the effective glyph height and recognition collapsed into
+  nonsense syllables. Measured on job-2 page 77, same pixels:
+
+  | input | text | conf |
+  |---|---|---|
+  | native page | `현성아!` | 0.999 |
+  | + 500 px lookahead | `야워을` | 0.609 |
+
+  Seven clean lines came back as six garbage ones — and because the garbage
+  boxes only partly covered the real text, **the Korean survived erasure while
+  English was lettered over it** (the page looked like a translation failure; it
+  was an OCR-input failure). The local PP-OCR fallback had the identical bug.
+  Both paths now OCR the page alone at native scale, then OCR only the boundary
+  *band* (page's last 500 px joined to the next page's first 500 px — 1000 px
+  tall, so still near native scale) and map the band's boxes back by the band
+  offset. A bubble that spans the cut is still read whole; the page's own text
+  keeps its native resolution.
+- **One bubble now holds one string.** A multi-line ko/zh bubble can come back
+  as several OCR blocks; each resolved to the same parent bubble and the
+  typesetter centred *every* one of them into it, lettering English on top of
+  English (job-2 page 34: `CAN YOU HEAR ME?` drawn straight through
+  `L-SENBAE! SENBAE!`). Blocks sharing a parent bubble are now merged before
+  translation — which also gives the LLM the whole bubble as one unit instead of
+  half a line at a time. Free-floating text (stat columns, captions) has no
+  bubble and is never merged.
+
+## [0.27.0] - 2026-09-15
+
+### Fixed
+- **Auto language detection read a KOREAN job as Chinese and silently destroyed
+  its translations.** `detect_language` treated "the `ch` recognizer produced
+  hanzi" as proof of Chinese — but the `ch` recognizer happily reads Korean as
+  plausible hanzi, so a Korean manhwa auto-detected as `zh`. The Chinese
+  recognizer then finds nothing in hangul, every page rendered **0 blocks**, and
+  the page was written back out as the *untranslated original*. Resuming/re-rendering
+  job 2 overwrote 8 already-translated pages before it was caught. Detection now
+  treats only KANA and HANGUL as positive script markers and lets hangul beat
+  hanzi, with `>= 2` character floors so a single stray glyph can never decide
+  (one katakana amid garbage was flipping Korean pages toward Japanese). Measured
+  on the real pages — job2 p1: ko probe hangul 20 / hanzi 0; job2 p2: ko hangul 16;
+  job3 (Chinese) p1: ko probe hangul 0. Verified after the fix: job 2 → ko,
+  job 3 → zh, job 4 → ja.
+- **A re-render that finds nothing now says so.** If a page renders 0 blocks but
+  previously had some, the engine logs an ERROR naming the page (it has just been
+  overwritten with the untranslated original) instead of finishing silently
+  "done" — the failure mode above was invisible until the pages were inspected.
+- **English lettered over un-erased source text (the "I'M RE하고" defect).** A
+  page-boundary carryover patch could stamp the page's OWN source glyphs back on
+  top of its freshly lettered bubble. Two compounding faults: (1) a page never
+  erased the next page's text that the 500 px lookahead strip had pulled in, so
+  the extracted patch contained that un-erased source text; (2) the previous
+  page's target region could bleed across the boundary and clip a bubble this
+  page owns, so the patch landed on top of its new lettering. Fixed by erasing
+  lookahead-strip text (it is never lettered there anyway) and dropping any
+  carryover patch that overlaps text the current page owns (~45% clippage, which
+  the old >50% containment test ignored). Verified on job-2 pages 41 and 77, and
+  the legitimate straddle (page 24) still carries over correctly.
+- **Blank carryover patches no longer damage the next page.** A straddling region
+  whose English sat higher up produced a patch of bare inpainted background (no
+  lettering). Pasting it achieved nothing, while its erase box destroyed the next
+  page's own content — job-2 page 30's `그날` narration was half-erased into a
+  smudge. Patches without lettering contrast are now dropped (measured: blank
+  10.8 std vs real patches 49 / 72).
+- **Microscopic English on tall-narrow vertical Japanese text.** A tategaki
+  narration column over artwork (`根性はあるけど器用貧乏！？`, job-4 page 5) had a
+  long English line fitted into its ~1-glyph width, producing unreadable
+  lettering. The "English is horizontal, so only tall-narrow text gets a wide
+  strip" rule already used by the Korean/Chinese path now applies to Japanese
+  free-floating text too.
+
+### Added
+- **Resume now works on a "partial" job.** `POST /api/jobs/{id}/start` previously
+  only accepted paused/cancelled/failed, so a job that finished `partial` (some
+  pages failed — e.g. a provider outage) could not be resumed at all, making the
+  "then Resume" advice in the new provider-outage error message impossible to
+  follow. It now re-queues the job and resets any page left running/failed, while
+  every page already `done` is skipped — a Resume never re-renders finished pages.
+- **Re-render a single page** (`POST /api/jobs/{id}/pages/{index}/rerender`, with a
+  **Re-render page** button in the side-by-side viewer). Resets just that page and
+  re-queues the job, so a pipeline fix can be applied to pages produced by older
+  code without re-running the whole job. Job counters (`pages_done`,
+  `blocks_found`, `blocks_ok`) have the page's previous contribution subtracted
+  first so they stay honest.
+
 ## [0.26.0] - 2026-09-15
 
 ### Added

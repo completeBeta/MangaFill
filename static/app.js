@@ -262,10 +262,13 @@ function jobActions(j) {
   const b = [];
   if (j.status === "running") b.push(`<button class="btn small" onclick="pauseJob(${j.id})">Pause</button>`);
   if (["paused", "cancelled", "failed"].includes(j.status)) b.push(`<button class="btn small" onclick="startJob(${j.id})">Start</button>`);
+  // A "partial" job has failed pages that Resume will retry (done pages are skipped).
+  if (j.status === "partial") b.push(`<button class="btn small" onclick="startJob(${j.id})">Resume</button>`);
   if (["queued", "running", "paused"].includes(j.status)) b.push(`<button class="btn small" onclick="stopJob(${j.id})">Stop</button>`);
   if (j.status === "done" || j.status === "partial") {
     b.push(`<button class="btn small" onclick="openViewer(${j.id})">View</button>`);
     b.push(`<a class="btn small" href="/api/jobs/${j.id}/download">Download</a>`);
+    b.push(`<button class="btn small" onclick="rerenderAll(${j.id})">Re-render all</button>`);
   }
   b.push(`<button class="btn small" onclick="deleteJob(${j.id})">Delete</button>`);
   return b.join("");
@@ -278,6 +281,17 @@ async function jobAction(id, action) {
 function startJob(id) { jobAction(id, "start"); }
 function pauseJob(id) { jobAction(id, "pause"); }
 function stopJob(id) { jobAction(id, "stop"); }
+
+// Re-render EVERY page with the current pipeline — the way to apply a pipeline
+// fix to a job produced by older code. Re-spends tokens and re-runs every page,
+// so it is confirmed first.
+async function rerenderAll(id) {
+  if (!confirm("Re-render EVERY page of this job with the current pipeline?\n\n"
+    + "Finished pages are redone from scratch — this spends API tokens again and "
+    + "can take a long time.")) return;
+  await api(`/api/jobs/${id}/rerender`, { method: "POST" });
+  loadJobs();
+}
 
 async function clearAllJobs() {
   if (!confirm("Delete ALL jobs and their files? This cannot be undone.")) return;
@@ -487,6 +501,35 @@ function showPage(index) {
 $("#viewer-prev").addEventListener("click", () => showPage(viewerState.index - 1));
 $("#viewer-next").addEventListener("click", () => showPage(viewerState.index + 1));
 $("#viewer-close").addEventListener("click", () => $("#viewer").classList.add("hidden"));
+
+// Re-render ONLY the page on screen, with the current pipeline. Queues the job
+// (the worker renders it in the background), then polls until it settles and
+// refreshes the translated pane so the fix is visible without a manual reload.
+$("#viewer-rerender").addEventListener("click", async () => {
+  const btn = $("#viewer-rerender");
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Queued\u2026";
+  try {
+    await api(`/api/jobs/${viewerState.jobId}/pages/${viewerState.index}/rerender`, { method: "POST" });
+    for (let i = 0; i < 75; i++) {
+      await new Promise((r) => setTimeout(r, 4000));
+      showPage(viewerState.index); // re-points the pane at the (rewritten) file
+      $("#viewer-trans").src =
+        `/api/jobs/${viewerState.jobId}/pages/${viewerState.index}/translated?t=${Date.now()}`;
+      let job = null;
+      try { job = await api(`/api/jobs/${viewerState.jobId}`); } catch {}
+      const pg = ((job && job.pages) || []).find((x) => x.index === viewerState.index);
+      if (pg && pg.status === "done" && (!job || job.status !== "running")) break;
+      if (pg && pg.status === "failed") break;
+    }
+    loadJobs();
+  } catch (err) {
+    alert("Re-render failed: " + err.message);
+  }
+  btn.disabled = false;
+  btn.textContent = label;
+});
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") $("#viewer").classList.add("hidden");
   if (e.key === "ArrowLeft" && !$("#viewer").classList.contains("hidden")) showPage(viewerState.index - 1);

@@ -1,0 +1,137 @@
+"""Lookahead must not be OCR'd together with the page (2026-09-15).
+
+PaddleOCR downsizes its input, so stitching the next page's strip onto a page
+before OCR shrinks the effective glyph height and recognition collapses into
+garbage syllables:
+
+    page 77, native   : '현성아!' (conf 0.999) + 6 more clean lines
+    page 77, stitched : '야워을' (conf 0.609), '욱ㄴ', '급야골', '극의못', ...
+
+Those garbage boxes only partly covered the real text, so the Korean survived
+erasure while English was lettered over it. `_ocr_ko_zh_native` OCRs the page and
+the boundary band as separate native-scale images and maps the band back.
+"""
+import numpy as np
+import pytest
+from PIL import Image
+
+import app.pipeline.render as render
+from app.pipeline.types import TextBlock
+
+
+def _fake_ocr(height_map):
+    calls = []
+
+    def fake(image, url, lang):
+        calls.append((image.width, image.height, lang))
+        for h, boxes in height_map.items():
+            if image.height == h:
+                return list(boxes)
+        return []
+    return fake, calls
+
+
+def test_band_ocr_never_sends_the_stitched_page(monkeypatch):
+    fake, calls = _fake_ocr({
+        400: [((10, 10, 50, 20), "PAGE", 0.99, 0.0),
+              ((10, 380, 50, 20), "BOTTOM", 0.90, 0.0)],
+        300: [((10, 140, 50, 20), "BAND_TOP", 0.98, 0.0),
+              ((10, 290, 50, 20), "NEXT", 0.97, 0.0)],
+    })
+    monkeypatch.setattr(render, "remote_ocr_multilingual", fake)
+    page = Image.new("RGB", (200, 400), "white")
+    lookahead = np.zeros((500, 200, 3), dtype=np.uint8)
+    out = render._ocr_ko_zh_native(page, np.asarray(page), lookahead,
+                                   "http://worker", "ko", band=150)
+    # The OCR call must never see a page taller than the native page.
+    assert max(h for _w, h, _l in calls) <= page.height
+    texts = {t: (x, y) for (x, y, _w, _h), t, _c, _a in out}
+    # Page pass keeps its own text, band pass is mapped back by the band offset.
+    assert texts["PAGE"] == (10, 10)
+    assert texts["BAND_TOP"][1] == 250 + 140
+    assert texts["NEXT"][1] == 250 + 290
+    # The page's copy of anything living inside the band is handed over.
+    assert "BOTTOM" not in texts
+
+
+def test_custom_recognizer_is_used_for_both_passes():
+    """The local PP-OCR fallback gets the same native+band treatment."""
+    seen = []
+
+    def ocr_fn(img, lang):
+        seen.append((img.width, img.height))
+        return [((1, 1, 10, 10), "T", 0.9, 0.0)]
+
+    page = Image.new("RGB", (200, 400), "white")
+    lookahead = np.zeros((500, 200, 3), dtype=np.uint8)
+    render._ocr_ko_zh_native(page, np.asarray(page), lookahead, None, "ko",
+                             band=150, ocr_fn=ocr_fn)
+    assert seen == [(200, 400), (200, 300)]
+
+
+def test_no_lookahead_is_a_single_native_call(monkeypatch):
+    fake, calls = _fake_ocr({400: [((10, 10, 50, 20), "PAGE", 0.99, 0.0)]})
+    monkeypatch.setattr(render, "remote_ocr_multilingual", fake)
+    page = Image.new("RGB", (200, 400), "white")
+    out = render._ocr_ko_zh_native(page, np.asarray(page), None, "http://w", "ko")
+    assert len(calls) == 1
+    assert [t for _b, t, _c, _a in out] == ["PAGE"]
+
+
+def test_band_is_capped_by_the_page_height(monkeypatch):
+    fake, calls = _fake_ocr({400: [], 500: []})
+    monkeypatch.setattr(render, "remote_ocr_multilingual", fake)
+    page = Image.new("RGB", (200, 400), "white")
+    short = np.zeros((50, 200, 3), dtype=np.uint8)
+    render._ocr_ko_zh_native(page, np.asarray(page), short, "http://w", "ko", band=500)
+    # band = min(500, page_h=400, strip=50) = 50 -> joined image is 100 tall
+    assert calls[1] == (200, 100, "ko")
+
+
+def test_wrong_width_lookahead_is_ignored(monkeypatch):
+    fake, calls = _fake_ocr({400: [((1, 1, 10, 10), "PAGE", 0.9, 0.0)]})
+    monkeypatch.setattr(render, "remote_ocr_multilingual", fake)
+    page = Image.new("RGB", (200, 400), "white")
+    odd = np.zeros((500, 199, 3), dtype=np.uint8)
+    out = render._ocr_ko_zh_native(page, np.asarray(page), odd, "http://w", "ko")
+    assert len(calls) == 1
+    assert [t for _b, t, _c, _a in out] == ["PAGE"]
+
+
+# ---------------------------------------------------------------- per-bubble merge
+
+def test_blocks_in_one_bubble_are_merged():
+    """job-2 page 34: 'CAN YOU HEAR ME?' was lettered through 'L-SENBAE! SENBAE!'."""
+    bubbles = [(0, 400, 320, 400)]
+    a = TextBlock(bbox=(1, 455, 311, 268), text="L선배!선배!", confidence=0.99,
+                  orientation="horizontal")
+    b = TextBlock(bbox=(139, 659, 141, 117), text="내말들려요?", confidence=0.99,
+                  orientation="horizontal")
+    out = render._merge_blocks_per_bubble([a, b], bubbles)
+    assert len(out) == 1
+    assert out[0].text == "L선배!선배! 내말들려요?"
+    assert out[0].bbox == (1, 455, 311, 321)  # union of both line boxes
+
+
+def test_blocks_in_different_bubbles_stay_separate():
+    bubbles = [(0, 0, 100, 100), (0, 300, 100, 100)]
+    a = TextBlock(bbox=(10, 10, 40, 20), text="가", confidence=0.9)
+    b = TextBlock(bbox=(10, 310, 40, 20), text="나", confidence=0.9)
+    out = render._merge_blocks_per_bubble([a, b], bubbles)
+    assert len(out) == 2
+    assert [x.text for x in out] == ["가", "나"]
+
+
+def test_free_floating_blocks_are_never_merged():
+    """Text with no enclosing bubble (stat columns, captions) keeps its layout."""
+    bubbles = [(0, 0, 100, 100)]
+    a = TextBlock(bbox=(500, 500, 40, 20), text="caption one", confidence=0.9)
+    b = TextBlock(bbox=(500, 540, 40, 20), text="caption two", confidence=0.9)
+    out = render._merge_blocks_per_bubble([a, b], bubbles)
+    assert len(out) == 2
+
+
+def test_no_bubbles_is_a_noop():
+    a = TextBlock(bbox=(0, 0, 10, 10), text="가")
+    assert render._merge_blocks_per_bubble([a], []) == [a]
+    assert render._merge_blocks_per_bubble([a], None) == [a]
