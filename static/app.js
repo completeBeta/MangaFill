@@ -321,6 +321,10 @@ async function loadSettings() {
   $("#upload-mode").value = s.output_mode;
   $("#settings-dry-run").checked = s.dry_run === "true";
   $("#settings-source-lang").value = s.source_lang || "auto";
+  $("#settings-llm-timeout").value = s.llm_timeout || "300";
+  $("#settings-llm-retries").value = s.llm_max_retries != null ? s.llm_max_retries : "2";
+  $("#settings-provider-fail-limit").value =
+    s.provider_fail_limit != null ? s.provider_fail_limit : "3";
 }
 
 // ---------- fonts ----------
@@ -379,6 +383,9 @@ $("#settings-save").addEventListener("click", async () => {
     output_mode: $("#settings-mode").value,
     dry_run: $("#settings-dry-run").checked ? "true" : "false",
     source_lang: $("#settings-source-lang").value,
+    llm_timeout: $("#settings-llm-timeout").value || "300",
+    llm_max_retries: $("#settings-llm-retries").value || "0",
+    provider_fail_limit: $("#settings-provider-fail-limit").value || "3",
   };
   const status = $("#settings-status");
   status.textContent = "Saving\u2026";

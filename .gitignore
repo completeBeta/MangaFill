@@ -36,3 +36,7 @@ scripts/
 
 # Generated output (translated/annotated pages — copyrighted source material)
 output/
+
+# Model caches downloaded at runtime (hf-cache ~1 GB, paddlex-cache ~240 MB)
+hf-cache/
+paddlex-cache/

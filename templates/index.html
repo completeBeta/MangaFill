@@ -137,6 +137,24 @@
             <input type="checkbox" id="settings-dry-run">
             <span>Dry run (detect + OCR only — no translation, no cost)</span>
           </label>
+
+          <h3 style="margin-top:20px">Translation provider</h3>
+          <label class="field">
+            <span>Request timeout (seconds)</span>
+            <input type="number" id="settings-llm-timeout" min="10" max="3600" step="10">
+          </label>
+          <p class="muted">How long a single translation request may take before it is aborted. Lax by default (300 s) — a degraded provider can answer slowly, and cutting off a slow-but-alive call throws the page away.</p>
+          <label class="field">
+            <span>Retries per request</span>
+            <input type="number" id="settings-llm-retries" min="0" max="10" step="1">
+          </label>
+          <p class="muted">Retried automatically on a transient provider error (timeout, connection failure, HTTP 429/5xx, empty completion), with increasing backoff. Default 2.</p>
+          <label class="field">
+            <span>Stop job after N consecutive failed pages</span>
+            <input type="number" id="settings-provider-fail-limit" min="1" max="50" step="1">
+          </label>
+          <p class="muted">When the provider is genuinely down, the job stops here and reports why, instead of running to the end leaving pages untranslated. Resume re-runs only the unfinished pages. Default 3.</p>
+
           <div class="toolbar">
             <button id="settings-save" class="btn primary">Save settings</button>
             <span id="settings-status" class="muted"></span>

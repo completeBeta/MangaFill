@@ -506,6 +506,8 @@ def render_translated_page(
     lang: str = "auto",
     lookahead: np.ndarray | None = None,
     carryover: list | None = None,
+    llm_timeout: float | None = None,
+    llm_max_retries: int | None = None,
 ) -> tuple[Image.Image, list[TextBlock], int, int, list]:
     """Run the full pipeline on one page.
 
@@ -686,6 +688,8 @@ def render_translated_page(
             blocks, model, api_key, base_url,
             translate_horizontal=has_vertical or has_chapter or (lang in ("ko", "zh")),
             source_lang=lang,
+            timeout=llm_timeout,
+            max_retries=llm_max_retries,
         )
 
     # ---- resolve typeset targets + erase boxes -------------------------------

@@ -24,6 +24,12 @@ SETTINGS: dict[str, tuple[str, tuple | None]] = {
     "device": (cfg.device if cfg.device in _DEVICE_CHOICES else "auto", _DEVICE_CHOICES),
     "gpu_worker_url": ("", None),  # e.g. http://gpu-host:9001 (remote vision worker)
     "source_lang": ("auto", _SOURCE_LANG_CHOICES),  # auto | ja | ko | zh
+    # Translation-provider resilience. Lax by default: a degraded provider can
+    # take minutes to answer, so give a slow-but-alive call room. Only repeated
+    # failures (a real outage) stop the job, loudly, with a visible error.
+    "llm_timeout": ("300", None),        # seconds to wait for one LLM request
+    "llm_max_retries": ("2", None),      # retries per request on a transient error
+    "provider_fail_limit": ("3", None),  # consecutive failed pages before stopping the job
 }
 
 

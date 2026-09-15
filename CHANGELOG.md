@@ -2,6 +2,30 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.26.0] - 2026-09-15
+
+### Added
+- **Translation timeouts and retries are now configurable in Settings** (Settings → Translation provider):
+  - `Request timeout (seconds)` — default **300** (lax). Was hardcoded at 120 s.
+  - `Retries per request` — default **2**, retried on a transient error with increasing backoff.
+  - `Stop job after N consecutive failed pages` — default **3**.
+
+  The defaults are deliberately lax: a degraded provider can answer slowly, and
+  aborting a slow-but-alive call throws the whole page away.
+- **Provider unavailability is reported instead of looking like a stall.** Every
+  translation failure is now a typed `ProviderError` naming the endpoint — e.g.
+  `api.deepseek.com returned no completion for model 'deepseek-flash'
+  (empty/absent 'choices')` — instead of surfacing as a bare
+  `KeyError: 'choices'` or `'NoneType' object is not subscriptable`. Transient
+  errors (timeout, connection failure, HTTP 429/5xx, empty completion) are
+  retried and logged; permanent ones (HTTP 401/400) fail immediately.
+- **Jobs no longer finish silently.** If the provider stays down, the job stops
+  with the reason shown on its card (`Translation provider unavailable — 3 pages
+  failed in a row (...)`) rather than running to the end leaving pages
+  untranslated — Resume re-runs only the unfinished pages. A job that finishes
+  with failed pages always carries an error (e.g. `1 of 193 page(s) failed —
+  first error (page 4): ...`) instead of showing a bare `partial`.
+
 ## [0.25.0] - 2026-09-12
 
 ### Added

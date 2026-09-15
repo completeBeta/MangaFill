@@ -7,6 +7,8 @@ import app.pipeline.translate as translate
 
 
 class _FakeResp:
+    status_code = 200
+
     def raise_for_status(self):
         pass
 
@@ -54,6 +56,8 @@ def test_clean_translation_keeps_english_and_strips_stray_cjk():
 
 def test_translate_page_sanitizes_garbage(monkeypatch):
     class _Fake:
+        status_code = 200
+
         def raise_for_status(self):
             pass
 
@@ -92,6 +96,8 @@ def test_translate_page_retries_missing_lines(monkeypatch):
         n_lines = sum(1 for l in user.split("\n") if l.strip()[:1].isdigit())
 
         class R:
+            status_code = 200
+
             def raise_for_status(self):
                 pass
 
@@ -116,6 +122,8 @@ def test_translate_page_retries_missing_lines(monkeypatch):
 
 def test_translate_page_horizontal_only_when_requested(monkeypatch):
     class _Fake:
+        status_code = 200
+
         def raise_for_status(self):
             pass
 

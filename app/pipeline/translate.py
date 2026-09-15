@@ -1,19 +1,55 @@
-"""Translation — LLM (OpenRouter, cloud-only, no local GPU).
+"""Translation — LLM (cloud-only, model-agnostic OpenAI-compatible endpoint).
 
-Batches a page's translatable lines (vertical dialogue) into one request, with
-the page's reading order preserved, so the model keeps speaker/tone consistency.
-Uses a NUMBERED response format (anchored per line) so an LLM preamble can't
-shift alignment. Returns (translations, cost_usd); mutates `translation` field.
+Batches a page's translatable lines into one request, with the page's reading
+order preserved, so the model keeps speaker/tone consistency. Uses a NUMBERED
+response format (anchored per line) so an LLM preamble can't shift alignment.
+
+Provider failures are typed: `_chat` raises `ProviderError` for HTTP errors,
+timeouts, connection failures, and malformed/empty responses (a 200 whose body
+carries no `choices` is the classic "provider is degraded" signature — it used to
+surface as a bare `KeyError: 'choices'`). Transient errors are retried with
+backoff; when retries are exhausted the page fails loudly instead of silently
+lettering nothing.
 """
 from __future__ import annotations
 
+import logging
 import re
+import time
 import unicodedata
 
 import httpx
 
 from .language import LANG_NAMES
 from .types import TextBlock
+
+log = logging.getLogger("mangafill.translate")
+
+# Lax defaults: a degraded provider can take minutes to answer, and killing a
+# slow-but-alive call costs a whole page. Both are user-tunable in Settings
+# (`llm_timeout`, `llm_max_retries`).
+DEFAULT_TIMEOUT = 300.0
+DEFAULT_MAX_RETRIES = 2
+_RETRY_BACKOFF_CAP = 20.0
+
+
+class ProviderError(RuntimeError):
+    """The translation provider failed (HTTP error, timeout, or bad response).
+
+    `transient` marks errors worth retrying (timeouts, connection resets, 429,
+    5xx, empty completion). `status` is the HTTP status when there was one.
+    """
+
+    def __init__(self, message: str, *, transient: bool = True, status: int | None = None):
+        super().__init__(message)
+        self.transient = transient
+        self.status = status
+
+
+def _provider_host(base_url: str) -> str:
+    """Short label for the endpoint, for user-facing error messages."""
+    return (base_url or "provider").split("//")[-1].split("/")[0] or "provider"
+
 
 SYSTEM_PROMPT = (
     "You are a professional comic translator. Translate each numbered {lang} "
@@ -148,20 +184,91 @@ def _clean_translation(raw: str) -> str:
     return ascii_s
 
 
+def _chat(payload: dict, api_key: str, base_url: str,
+          timeout: float) -> tuple[str, int, int]:
+    """POST one chat completion; return (content, prompt_tokens, completion_tokens).
+
+    Every failure mode is translated into a `ProviderError` naming the endpoint,
+    so a provider outage reads as "api.deepseek.com returned no completion …"
+    rather than `KeyError: 'choices'`.
+    """
+    host = _provider_host(base_url)
+    url = f"{base_url}/chat/completions"
+    try:
+        resp = httpx.post(
+            url,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=timeout,
+        )
+    except httpx.TimeoutException as e:
+        raise ProviderError(
+            f"{host} timed out after {timeout:.0f}s (no response) — provider slow or unreachable",
+            transient=True,
+        ) from e
+    except httpx.HTTPError as e:
+        raise ProviderError(
+            f"{host} connection failed ({type(e).__name__}: {e})", transient=True
+        ) from e
+
+    if resp.status_code >= 400:
+        body = " ".join((resp.text or "").split())[:300]
+        transient = resp.status_code == 429 or resp.status_code >= 500
+        raise ProviderError(
+            f"{host} returned HTTP {resp.status_code}{(' — ' + body) if body else ''}",
+            transient=transient, status=resp.status_code,
+        )
+
+    try:
+        data = resp.json()
+    except Exception as e:
+        body = " ".join((resp.text or "").split())[:200]
+        raise ProviderError(
+            f"{host} returned a non-JSON response ({body!r})", transient=True
+        ) from e
+
+    choices = data.get("choices") if isinstance(data, dict) else None
+    if not choices or choices[0] is None:
+        detail = ""
+        if isinstance(data, dict) and data.get("error"):
+            detail = " — " + " ".join(str(data["error"]).split())[:200]
+        raise ProviderError(
+            f"{host} returned no completion for model '{payload.get('model')}' "
+            f"(empty/absent 'choices'){detail}",
+            transient=True,
+        )
+
+    msg = choices[0].get("message") or {}
+    content = msg.get("content") or ""
+    usage = data.get("usage") or {}
+    return (content,
+            int(usage.get("prompt_tokens") or 0),
+            int(usage.get("completion_tokens") or 0))
+
+
 def translate_lines(
     lines: list[str],
     model: str,
     api_key: str,
     base_url: str = "https://openrouter.ai/api/v1",
     source_lang: str = "ja",
+    timeout: float | None = None,
+    max_retries: int | None = None,
 ) -> tuple[list[str], int, int]:
-    """Translate a batch of JP lines to EN.
+    """Translate a batch of lines to EN, retrying transient provider failures.
 
     Returns (translations, prompt_tokens, completion_tokens) — the token counts
     come from the API `usage` object so the caller can price the call.
+
+    Raises `ProviderError` once retries are exhausted (or immediately for a
+    permanent error such as HTTP 401/400) — the caller surfaces it to the job so
+    an outage is visible instead of silently leaving pages untranslated.
     """
     if not lines:
         return [], 0, 0
+
+    timeout = float(timeout) if timeout else DEFAULT_TIMEOUT
+    retries = DEFAULT_MAX_RETRIES if max_retries is None else max(0, int(max_retries))
 
     user = "Translate these manga lines:\n" + "\n".join(
         f"{i + 1}. {t}" for i, t in enumerate(lines)
@@ -181,18 +288,24 @@ def translate_lines(
     if "deepseek" in base_url.lower():
         payload["thinking"] = {"type": "disabled"}
 
-    resp = httpx.post(
-        f"{base_url}/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json=payload,
-        timeout=120,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    content = data["choices"][0]["message"].get("content") or ""
-    usage = data.get("usage", {}) or {}
-    prompt_tokens = usage.get("prompt_tokens", 0) or 0
-    completion_tokens = usage.get("completion_tokens", 0) or 0
+    host = _provider_host(base_url)
+    last: ProviderError | None = None
+    for attempt in range(retries + 1):
+        try:
+            content, prompt_tokens, completion_tokens = _chat(payload, api_key, base_url, timeout)
+            break
+        except ProviderError as e:
+            last = e
+            if not e.transient or attempt >= retries:
+                log.error("translation provider failure (%s/%s attempts): %s",
+                          attempt + 1, retries + 1, e)
+                raise
+            delay = min(_RETRY_BACKOFF_CAP, 2.0 * (2 ** attempt))
+            log.warning("translation provider error (attempt %d/%d): %s — retrying in %.0fs",
+                        attempt + 1, retries + 1, e, delay)
+            time.sleep(delay)
+    else:  # pragma: no cover - the loop always breaks or raises
+        raise last if last else ProviderError(f"{host} returned no completion", transient=True)
 
     translations = _parse_numbered(content, len(lines))
     return translations, prompt_tokens, completion_tokens
@@ -205,6 +318,8 @@ def translate_page(
     base_url: str = "https://openrouter.ai/api/v1",
     translate_horizontal: bool = False,
     source_lang: str = "ja",
+    timeout: float | None = None,
+    max_retries: int | None = None,
 ) -> tuple[list[TextBlock], int, int]:
     """Translate the translatable blocks of a page.
 
@@ -220,6 +335,9 @@ def translate_page(
     translating) are all treated as "no translation". The block then keeps an
     empty `translation`, so the typesetter leaves the original Japanese intact
     rather than painting garbage onto the page.
+
+    A `ProviderError` from the provider is NOT swallowed — it propagates so the
+    job can report the outage (and stop) instead of quietly producing empty pages.
     """
     translatable = [
         b for b in blocks
@@ -230,7 +348,8 @@ def translate_page(
         return blocks, 0, 0
 
     translations, pt, ct = translate_lines(
-        [b.text for b in translatable], model, api_key, base_url, source_lang=source_lang
+        [b.text for b in translatable], model, api_key, base_url,
+        source_lang=source_lang, timeout=timeout, max_retries=max_retries,
     )
     for b, en in zip(translatable, translations):
         b.translation = _clean_translation(en)
@@ -242,10 +361,15 @@ def translate_page(
         if b.translation or not b.text:
             continue
         try:
-            (en,), p2, c2 = translate_lines([b.text], model, api_key, base_url, source_lang=source_lang)
+            (en,), p2, c2 = translate_lines(
+                [b.text], model, api_key, base_url, source_lang=source_lang,
+                timeout=timeout, max_retries=max_retries,
+            )
             b.translation = _clean_translation(en)
             pt += p2
             ct += c2
+        except ProviderError:
+            raise  # provider is down — surface it, don't silently skip lines
         except Exception:
             pass  # leave untranslated (original kept) rather than crash the page
 

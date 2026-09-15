@@ -18,6 +18,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.models import Job, Model, Page, TextBlock
 from app.pipeline.render import render_translated_page
+from app.pipeline.translate import ProviderError
 from app.services.logging import get_logger
 from app.services.pricing import compute_cost
 from app.settings_store import default_model, get_model, get_setting
@@ -29,6 +30,14 @@ _CHUNK = 1024 * 1024  # 1 MB streaming chunks — never read a whole upload into
 # Vertical-scroll webtoon lookahead: how much of the next page's top to stitch
 # onto the current page so a bubble cut at the page boundary is seen whole.
 LOOKAHEAD_PX = 500
+
+
+def _num_setting(db, key: str, default: float) -> float:
+    """Read a numeric setting, falling back to `default` when absent/garbage."""
+    try:
+        return float(get_setting(db, key))
+    except (KeyError, TypeError, ValueError):
+        return float(default)
 
 
 def _now() -> str:
@@ -169,12 +178,19 @@ def process_job(job_id: int) -> None:
         m, dry_run = resolve_translation(db, job.model_id)
         font_id = get_setting(db, "font")
         gpu_url = get_setting(db, "gpu_worker_url").strip()
+        # Translation-provider resilience (Settings tab). Lax by default: a
+        # degraded provider can take minutes to answer, so a slow-but-alive call
+        # is given room; only a real outage (repeated failures) stops the job.
+        llm_timeout = _num_setting(db, "llm_timeout", 300.0)
+        llm_max_retries = int(_num_setting(db, "llm_max_retries", 2))
+        provider_fail_limit = max(1, int(_num_setting(db, "provider_fail_limit", 3)))
         model = m.name if m else ""
         base_url = m.base_url if m else ""
         key = _resolve_key(m)
         out_dir = _out_dir(job_id)
         os.makedirs(out_dir, exist_ok=True)
-        log.info("job %s: model=%s dry_run=%s", job_id, model, dry_run)
+        log.info("job %s: model=%s dry_run=%s llm_timeout=%.0fs retries=%d provider_fail_limit=%d",
+                 job_id, model, dry_run, llm_timeout, llm_max_retries, provider_fail_limit)
 
         pages = db.query(Page).filter(Page.job_id == job_id).order_by(Page.index).all()
         stopped = False
@@ -208,6 +224,7 @@ def process_job(job_id: int) -> None:
 
         carryover: list = []  # patches handed from the previous page (boundary bubbles)
         do_lookahead = lang in ("ko", "zh")
+        provider_streak = 0  # consecutive page failures caused by the LLM provider
         for idx, p in enumerate(pages):
             # Respect stop/pause set from the API mid-run (fresh read from DB).
             try:
@@ -231,6 +248,7 @@ def process_job(job_id: int) -> None:
                     font_id=font_id, gpu_worker_url=gpu_url,
                     progress_cb=_progress, lang=lang,
                     lookahead=lookahead, carryover=carryover,
+                    llm_timeout=llm_timeout, llm_max_retries=llm_max_retries,
                 )
                 out_path = _save_output(img, out_dir, p.original_path)
                 p.output_path = out_path
@@ -255,13 +273,37 @@ def process_job(job_id: int) -> None:
                         confidence=b.confidence,
                     ))
                 job.pages_done += 1
+                provider_streak = 0
                 log.info("job %s page %d/%d done (%d blocks, %d translated)",
                          job_id, job.pages_done, job.pages_total, len(blocks),
                          sum(1 for b in blocks if b.translation))
             except Exception as e:
                 p.status = "failed"
                 p.error = str(e)
-                log.warning("job %s page %d failed: %s", job_id, p.index, e)
+                if isinstance(e, ProviderError):
+                    # The LLM endpoint itself failed. Retries already happened
+                    # inside translate_lines, so a failure here means the
+                    # provider is genuinely down: say so loudly and stop rather
+                    # than churning through every remaining page untranslated.
+                    provider_streak += 1
+                    log.error("job %s page %d failed — translation provider error (%d in a row): %s",
+                              job_id, p.index, provider_streak, e)
+                    if provider_streak >= provider_fail_limit:
+                        job.status = "failed"
+                        job.error = (
+                            f"Translation provider unavailable — {provider_streak} pages failed "
+                            f"in a row ({e}). Job stopped. Check the model endpoint / API key in "
+                            f"Settings, then Resume (already-finished pages are skipped)."
+                        )
+                        job.updated_at = _now()
+                        db.commit()
+                        log.error("job %s stopped: translation provider unavailable (%s)",
+                                  job_id, e)
+                        stopped = True
+                        break
+                else:
+                    provider_streak = 0
+                    log.warning("job %s page %d failed: %s", job_id, p.index, e)
             job.updated_at = _now()
             db.commit()
 
@@ -273,15 +315,26 @@ def process_job(job_id: int) -> None:
 
         # Final status + output mode.
         done = db.query(Page).filter(Page.job_id == job_id, Page.status == "done").count()
+        failed_pages = db.query(Page).filter(Page.job_id == job_id, Page.status == "failed").all()
         total = job.pages_total
         job.status = "done" if done == total else ("partial" if done > 0 else "failed")
         job.stage = ""
         job.finished_at = _now()
         if done > 0:
-            job.error = _assemble(job_id, job.output_mode, job.source_format) or None
+            job.error = _assemble(job_id, job.output_mode, job.source_format) or job.error
+        # Never finish a job silently: if any page failed, say which and why.
+        # (A silent "partial" finishing with no explanation is exactly what made a
+        # provider outage look like a stalled job.)
+        if failed_pages and not job.error:
+            first = failed_pages[0]
+            job.error = (
+                f"{len(failed_pages)} of {total} page(s) failed"
+                + (f" — first error (page {first.index + 1}): {first.error}" if first.error else "")
+            )
         job.updated_at = _now()
         db.commit()
-        log.info("job %s finished: status=%s (%d/%d pages)", job_id, job.status, done, total)
+        log.info("job %s finished: status=%s (%d/%d pages, %d failed)",
+                 job_id, job.status, done, total, len(failed_pages))
     except Exception as e:
         # Never let the worker die on one bad job.
         try:
