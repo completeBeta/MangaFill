@@ -54,6 +54,25 @@ def test_band_is_rescaled_to_the_page_long_side(monkeypatch):
     assert abs(w - 267) <= 1, f"band width {w} not rescaled with the join"
 
 
+def test_band_boxes_are_returned_as_integers(monkeypatch):
+    """The rescale makes box coords fractional; downstream array slicing needs ints.
+
+    v0.27.4 shipped the fractional coords and 10 of job 2's 129 pages died with
+    "'float' object cannot be interpreted as an integer".
+    """
+    calls = []
+    monkeypatch.setattr(render, "remote_ocr_multilingual",
+                        _seq_ocr([], [((10, 140, 50, 20), "BAND", 0.9, 0.0)], calls))
+    page = Image.new("RGB", (200, 400), "white")
+    lookahead = np.zeros((500, 200, 3), dtype=np.uint8)
+    out = render._ocr_ko_zh_native(page, np.asarray(page), lookahead, "http://w",
+                                   "ko", band=150)
+    assert len(out) == 1
+    box, text, _c, _a = out[0]
+    assert text == "BAND"
+    assert all(isinstance(v, int) for v in box), f"non-integer box: {box}"
+
+
 def test_custom_recognizer_is_used_for_both_passes():
     """The local PP-OCR fallback gets the same native+band treatment."""
     seen = []

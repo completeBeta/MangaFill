@@ -234,8 +234,21 @@ def _ocr_ko_zh_native(page_image, page_np, lookahead, worker_url, lang: str,
     else:
         joined_img, inv = Image.fromarray(joined), 1.0
     off = page_h - band
+    # Map the band's boxes back to page coordinates, and keep them INTEGERS:
+    # the rescale makes them fractional, and downstream code slices arrays with
+    # these boxes (erase/inpaint/carryover), which raises "'float' object cannot
+    # be interpreted as an integer" — 10 of job 2's 129 pages died that way
+    # (v0.27.4). Round the corners, then derive w/h from them so the box does not
+    # drift.
+    def _back(bx, by, bw, bh):
+        x0 = int(round(bx * inv))
+        y0 = int(round(by * inv)) + off
+        x1 = int(round((bx + bw) * inv))
+        y1 = int(round((by + bh) * inv)) + off
+        return (x0, y0, x1 - x0, y1 - y0)
+
     band_boxes = [
-        ((x * inv, y * inv + off, w * inv, h * inv), text, conf, angle)
+        (_back(x, y, w, h), text, conf, angle)
         for (x, y, w, h), text, conf, angle in call(joined_img, lang)
     ]
     kept = [b for b in boxes if b[0][1] < off]

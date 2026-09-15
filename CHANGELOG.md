@@ -2,6 +2,17 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.5] - 2026-09-15
+
+### Fixed
+- **Fractional box coordinates killed 10 pages.** Rescaling the boundary band
+  (v0.27.4) makes the mapped-back box coordinates fractional, and downstream code
+  slices numpy arrays with those boxes — `'float' object cannot be interpreted as
+  an integer`. Job 2 ended `partial` with 10 of 129 pages failed. The mapping now
+  rounds each corner to an integer and derives `w`/`h` from the rounded corners so
+  the box cannot drift. (The job reported the failures instead of finishing quietly
+  with `error=null` — that's the v0.26.0 provider-resilience work paying off.)
+
 ## [0.27.4] - 2026-09-15
 
 ### Fixed
