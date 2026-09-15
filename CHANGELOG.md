@@ -2,6 +2,25 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.6] - 2026-09-15
+
+### Fixed
+- **Drawn sound effects were erased and replaced by a tiny word.** For ko/zh, any
+  block with no speech bubble was lettered through `_caption_region` with the
+  page-width font cap from `_draw_box` (`~width/32` = **21px on a 690px webtoon
+  page**). A drawn SFX is art, not prose, so a page-wide sound effect collided
+  head-on with that cap: job-2 page 85's `조~으~옹..` — 421px tall, spanning the
+  width of the panel — was erased (leaving an inpainted smear) and replaced by a
+  **21px** "Quiet." floating in the middle of the void.
+
+  SFX and other short free-standing art text now letter into their **own OCR box**
+  (PaddleOCR returns the tight text region for ko/zh, so the box is literally the
+  footprint the sound effect occupies) with the cap derived from that box rather
+  than the page, and uppercased as comics letter SFX. Same page, same block:
+  21px → ~180px "QUIET.", sitting exactly where the Korean was.
+  Vertical art text still uses `_caption_region` (English is horizontal, so a
+  tall column genuinely needs the widening) and captions/labels are unaffected.
+
 ## [0.27.5] - 2026-09-15
 
 ### Fixed

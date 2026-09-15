@@ -15,6 +15,7 @@ class TextBlock:
     confidence: float | None = None
     orientation: str = "horizontal"            # horizontal | vertical | furigana
     angle: float = 0.0                         # text-line slant (deg, [-45,45], + = down-to-right)
+    is_sfx: bool = False                       # drawn sound effect / short art text (no speech bubble)
 
 
 def polygon_to_bbox(box: list) -> tuple:

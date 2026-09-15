@@ -256,11 +256,20 @@ def typeset_page(
         if not b.translation:
             continue
         region = regions.get(id(b), b.bbox) if regions else b.bbox
-        bcap = cap
-        if b.orientation == "horizontal":
-            # Horizontal captions/stat lines letter at a size tied to their own
-            # text height, not the full-page cap — a short footnote should not
-            # blow up to the max size just because the caption region is wide.
-            bcap = min(cap, max(14, int(b.bbox[3] * 0.8)))
-        _draw_box(out, draw, region, b.translation, fp, bcap, angle=b.angle)
+        text = b.translation
+        if getattr(b, "is_sfx", False):
+            # A drawn sound effect is art, not prose: letter it to occupy the space
+            # the sound effect did. The page-width cap (`cap`, ~width/32 = 21px on
+            # a 690px webtoon page) rendered a 421px-tall SFX as a 21px word, so
+            # size the cap from the box instead. Uppercase, as comics letter SFX.
+            bcap = min(200, max(14, int(min(region[2], region[3]))))
+            text = text.upper()
+        else:
+            bcap = cap
+            if b.orientation == "horizontal":
+                # Horizontal captions/stat lines letter at a size tied to their own
+                # text height, not the full-page cap — a short footnote should not
+                # blow up to the max size just because the caption region is wide.
+                bcap = min(cap, max(14, int(b.bbox[3] * 0.8)))
+        _draw_box(out, draw, region, text, fp, bcap, angle=b.angle)
     return out

@@ -289,6 +289,28 @@ def _band_handover(page_boxes: list, band_boxes: list, page_h: int) -> list:
     return sorted(out_page + out_band, key=lambda b: (b[0][1], b[0][0]))
 
 
+def _is_drawn_sfx(block) -> bool:
+    """True for a drawn sound effect / short free-standing art text (ko/zh).
+
+    These have no speech bubble and only a few characters, and their OCR box is
+    TIGHT around the lettering (PaddleOCR returns the text region, not a bubble),
+    so the box is literally the footprint the sound effect occupies on the art.
+
+    Lettering them like a caption was the bug: the font cap came from the PAGE
+    width (`_draw_box` uses ~width/32, i.e. 21px on a 690px webtoon page), so
+    job-2 page 85's page-wide `조~으~옹..` — 421px tall — was erased and replaced
+    by a 21px "Quiet." floating in the inpainted smear. Filling the tight box
+    instead puts English where the sound effect was, at a comparable size.
+    """
+    t = (block.text or "").strip()
+    if not t or len(t) > 8:
+        return False
+    if block.orientation != "horizontal":
+        return False  # vertical art text needs `_caption_region`'s widening
+    x, y, w, h = block.bbox
+    return h >= 28    # a drawn glyph block, not a small label/stamp
+
+
 def _merge_blocks_per_bubble(blocks: list, bubbles: list) -> list:
     """Merge blocks that resolve to the SAME speech bubble into one block.
 
@@ -998,6 +1020,14 @@ def render_translated_page(
             raw = find_parent_bubble(bubbles, b.bbox) if bubbles else None
             if raw is not None:
                 region = _inset_box(raw)
+            elif _is_drawn_sfx(b):
+                # Drawn sound effect / art text with no bubble: its OCR box is the
+                # footprint of the lettering on the art, so letter into that box at
+                # a size that fills it (see `typeset._draw_box`) instead of
+                # treating it like a caption — that shrank a page-wide SFX to a
+                # ~21px word via the page-width font cap.
+                b.is_sfx = True
+                region = b.bbox
             else:
                 sb = find_speech_box(image_np, b.bbox)
                 if sb:
