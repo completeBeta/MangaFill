@@ -31,6 +31,42 @@ def _fake_ocr(height_map):
     return fake, calls
 
 
+# ---------------------------------------------------------------- band handover
+
+def test_boundary_line_is_not_read_twice():
+    """Both passes see the boundary line; the LLM must get it once.
+
+    Job-2 page 77, in the app: page pass AND band pass both returned '살아!',
+    `_merge_horizontal_words` joined them into '살아! 살아!', and the page came
+    out reading "Live here! Live here!".
+    """
+    page = [((10, 100, 50, 20), "살아!", 0.99, 0.0)]
+    band = [((10, 101, 50, 20), "살아!", 0.99, 0.0)]   # same line, band's copy
+    out = render._band_handover(page, band, 400)
+    assert [t for _b, t, _c, _a in out] == ["살아!"]
+
+
+def test_band_read_of_a_crossing_bubble_replaces_the_partial_read():
+    """A bubble cut by the page edge: keep the band's whole reading, not the top half."""
+    page = [((100, 200, 200, 200), "PARTIAL", 0.9, 0.0)]       # top half only
+    band = [((100, 200, 200, 400), "WHOLE BUBBLE", 0.99, 0.0)]  # crosses page_h
+    out = render._band_handover(page, band, 400)
+    assert [t for _b, t, _c, _a in out] == ["WHOLE BUBBLE"]
+
+
+def test_next_page_text_from_the_band_is_kept():
+    """Text below the cut still reaches the pipeline (erase + carryover)."""
+    page = [((10, 100, 50, 20), "PAGE", 0.9, 0.0)]
+    band = [((10, 430, 50, 20), "NEXT", 0.9, 0.0)]
+    out = render._band_handover(page, band, 400)
+    assert sorted(t for _b, t, _c, _a in out) == ["NEXT", "PAGE"]
+
+
+def test_handover_without_a_band_is_a_noop():
+    page = [((10, 100, 50, 20), "PAGE", 0.9, 0.0)]
+    assert render._band_handover(page, [], 400) == page
+
+
 def test_band_ocr_never_sends_the_stitched_page(monkeypatch):
     fake, calls = _fake_ocr({
         400: [((10, 10, 50, 20), "PAGE", 0.99, 0.0),

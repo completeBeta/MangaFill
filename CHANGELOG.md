@@ -2,6 +2,20 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.2] - 2026-09-15
+
+### Fixed
+- **A boundary line was translated twice.** v0.27.1's fix OCRs the page and the
+  boundary band separately, but the two passes overlap by design — so a line near
+  the cut was read by BOTH. `_merge_horizontal_words` joined the pair into one
+  block and the page came out reading "Live here! Live here!" (`살아! 살아!`).
+  `_band_handover` now reconciles the passes: a band box that *crosses* the page
+  cut is the authoritative whole-bubble read, so the page's partial view of it is
+  dropped; a band box that stays inside the page and duplicates a surviving page
+  box is dropped in favour of the page's own native read. Verified on the exact
+  page: `숨막히는도시 생활 질리거든언제든 내려와살아!` → "City life's suffocating
+  and gets old-come down and live here anytime!"
+
 ## [0.27.1] - 2026-09-15
 
 ### Fixed

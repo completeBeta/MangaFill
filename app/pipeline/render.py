@@ -223,10 +223,41 @@ def _ocr_ko_zh_native(page_image, page_np, lookahead, worker_url, lang: str,
         for (x, y, w, h), text, conf, angle in call(Image.fromarray(joined), lang)
     ]
     kept = [b for b in boxes if b[0][1] < off]
-    if len(kept) != len(boxes):
+    kept = _band_handover(kept, band_boxes, page_h)
+    if len(kept) != len(boxes) or band_boxes:
         print(f"[ocr] native={len(boxes)} -> {len(kept)} after band handover, "
               f"band={len(band_boxes)} (offset {off})")
-    return kept + band_boxes
+    return kept
+
+
+def _band_handover(page_boxes: list, band_boxes: list, page_h: int) -> list:
+    """Reconcile the page pass and the boundary-band pass into one box list.
+
+    The two passes overlap by design (the band is the page's last `band` rows
+    joined to the next page's first `band` rows), so the same pixels can be read
+    twice. Naively concatenating them double-counts a line: page 77's boundary
+    line came back as '살아!' from BOTH passes and `_merge_horizontal_words`
+    joined the pair into '살아! 살아!' — which the LLM then lettered as
+    "Live here! Live here!". Two rules, in order:
+
+    1. A band box that CROSSES the page cut is the authoritative reading of a
+       boundary bubble (the page pass only saw its top). Drop this page's
+       partial view of it — otherwise the partial version is lettered as well.
+    2. A band box that stays inside the page and duplicates a surviving page box
+       is redundant — drop it in favour of the page's own (fuller, native) read.
+    """
+    if not band_boxes:
+        return page_boxes
+    crossing = [b for b in band_boxes if b[0][1] + b[0][3] > page_h]
+    out_page = [
+        b for b in page_boxes
+        if not any(_box_containment(b[0], c[0]) > 0.6 for c in crossing)
+    ]
+    out_band = [
+        b for b in band_boxes
+        if not any(_box_containment(b[0], p[0]) > 0.6 for p in out_page)
+    ]
+    return sorted(out_page + out_band, key=lambda b: (b[0][1], b[0][0]))
 
 
 def _merge_blocks_per_bubble(blocks: list, bubbles: list) -> list:
