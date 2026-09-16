@@ -17,7 +17,8 @@ the original array (PIL may work on a copy), which silently produced blank fixtu
 import numpy as np
 from PIL import Image, ImageDraw
 
-from app.pipeline.render import (_bubble_covered, _bubble_without_text, _ink_is_glyph_like,
+from app.pipeline.render import (_bubble_covered, _bubble_without_text, _glyph_count,
+                                 _ink_is_glyph_like, _ink_matches_length,
                                  _ocr_bubbles_without_text, _recoverable_text)
 from app.pipeline.types import TextBlock
 
@@ -186,3 +187,29 @@ def test_no_bubbles_is_a_noop():
     page = _page([])
     assert _ocr_bubbles_without_text(page, [], []) == []
     assert _ocr_bubbles_without_text(page, None, []) == []
+
+
+def test_glyph_count_ignores_punctuation():
+    assert _glyph_count("真") == 1
+    assert _glyph_count("．．．っ") == 1
+    assert _glyph_count("それぞれ、") == 4
+    assert _glyph_count("") == 0
+
+
+def test_ink_matches_length_catches_a_single_glyph_misread_as_a_word():
+    """job-4 page 88: a brush-drawn 響 came back as それぞれ、 (4 kana, ~20% ink needed);
+    the balloon only holds 6.7% ink, so four characters are impossible — reject."""
+    assert not _ink_matches_length(0.067, "それぞれ、")   # the real misread
+    assert _ink_matches_length(0.067, "真")              # one glyph, plausible
+    assert _ink_matches_length(0.067, "私")
+    assert _ink_matches_length(0.25, "それぞれ、")        # 25% ink could hold 4 kana
+    assert _ink_matches_length(0.014, "．．．っ")          # 1 glyph + punctuation
+
+
+def test_recovery_rejects_a_misread_word_but_keeps_the_glyph():
+    bubble = (100, 100, 100, 100)
+    page = _page([bubble], glyph_size=16)     # ~6% ink: room for one glyph
+    assert _ocr_bubbles_without_text(page, [bubble], [],
+                                     ocr_fn=lambda i, b: ("真", None))[0].text == "真"
+    assert _ocr_bubbles_without_text(page, [bubble], [],
+                                     ocr_fn=lambda i, b: ("それぞれ、", None)) == []

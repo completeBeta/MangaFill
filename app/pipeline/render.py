@@ -247,6 +247,32 @@ def _recoverable_text(text: str) -> bool:
     return bool(_KANJI.search(t))
 
 
+_PUNCT_ONLY = re.compile(r"[\s、。．，,\.！？!?…‥ー〜～「」『』（）()\[\]【】]")
+
+
+def _glyph_count(text: str) -> int:
+    """Characters that actually have to be drawn (punctuation is nearly free)."""
+    return len(_PUNCT_ONLY.sub("", text or ""))
+
+
+def _ink_matches_length(ink_frac: float, text: str, ink_frac_per_glyph: float = 0.05) -> bool:
+    """Is the balloon's ink consistent with the number of characters OCR returned?
+
+    manga-ocr misreads a single stylized glyph as a short word: job-4 page 88's 響 (a
+    brush-drawn name) came back as それぞれ、, which would have lettered "EACH OF YOU,"
+    into a name balloon. A line of kana needs far more ink than one glyph, so when the
+    interior holds less than `ink_frac_per_glyph` ink per character at most two are
+    plausible. Calibrated on the real cases: one glyph measures 1.4-10.5% of the inset
+    (真 6.2%, 響 6.7%), so four kana would need ≈20% while page 88's balloon holds
+    6.7% — the misread is rejected. Erring high only leaves a balloon Japanese; erring
+    low letters a wrong word into it.
+    """
+    n = _glyph_count(text)
+    if n <= 2:
+        return True
+    return ink_frac >= ink_frac_per_glyph * n
+
+
 def _ocr_bubbles_without_text(image_np: np.ndarray, bubbles, blocks: list[TextBlock],
                               ocr_fn=None, min_ink: float = _MIN_BUBBLE_INK,
                               max_ink: float = _MAX_BUBBLE_INK) -> list[TextBlock]:
@@ -292,6 +318,8 @@ def _ocr_bubbles_without_text(image_np: np.ndarray, bubbles, blocks: list[TextBl
         text = (text or "").strip()
         if not _has_japanese(text) or not _recoverable_text(text):
             continue
+        if not _ink_matches_length(ink_frac, text):
+            continue  # too little ink for that many glyphs — a misread, not a line
         out.append(TextBlock(bbox=(ix, iy, iw, ih), text=text,
                              confidence=None, orientation="vertical"))
     return out

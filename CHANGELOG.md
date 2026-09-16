@@ -2,6 +2,26 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.11] - 2026-09-16
+
+### Fixed
+- **A single stylized glyph could be misread as a short word and lettered as one.**
+  Reviewing the v0.27.10 recoveries on the real pages caught job-4 page 88: the
+  balloon holds a brush-drawn 響 (a name) and manga-ocr returned `それぞれ、` — the
+  balloon was lettered "EACH OF YOU," instead. `_ink_matches_length` checks the OCR
+  result against the ink the balloon actually holds: a line of characters needs far
+  more ink than one glyph, so when the interior holds less than ~5% ink per character
+  (measured: one glyph = 1.4-10.5% of the inset; the misread's four kana would need
+  ~20%) at most two characters are accepted. Page 88's balloon is left as-is again
+  while the reported 真 (page 7) still recovers. Erring high only leaves a balloon
+  Japanese; erring low letters a wrong word into it.
+
+### Verified
+- 186 unit tests pass (3 new: punctuation-free glyph counting, the page-88 misread vs
+  a real single glyph, and the recovery rejecting the misread while keeping 真).
+- Re-scanned the affected pages: page 88 recovers 0 balloons (misread rejected), page 7
+  still recovers 真.
+
 ## [0.27.10] - 2026-09-16
 
 ### Fixed
