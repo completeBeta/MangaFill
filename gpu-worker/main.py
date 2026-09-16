@@ -30,7 +30,7 @@ from models import (
     ocr_multilingual_blocks,
 )
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 app = FastAPI(title="Manga Fill GPU worker", version=__version__)
 
@@ -100,6 +100,12 @@ def detect_ocr(image: UploadFile = File(...)) -> dict:
     stat column isn't returned both whole and line-by-line (which made the app
     typeset English on top of English). Blocks are sorted top-to-bottom, then
     right-to-left within a row.
+
+    `detect_containers` also drops narrow-and-tall `text_free` regions whose
+    detector score is weak — the halftone-screentone false positives where
+    manga-ocr invents a phrase out of the dots and the app then letters it onto
+    the artwork. The count comes back as `dropped_halftone` so the app's logs show
+    the filter working instead of silently losing regions.
     """
     img = _load(image)
     det = detect_containers(img)
@@ -142,7 +148,8 @@ def detect_ocr(image: UploadFile = File(...)) -> dict:
         seen.append((x, y, w, h))
 
     blocks.sort(key=lambda b: (b["bbox"][1], -b["bbox"][0]))
-    return {"bubble": det["bubble"], "blocks": blocks}
+    return {"bubble": det["bubble"], "blocks": blocks,
+            "dropped_halftone": det.get("dropped_halftone", 0)}
 
 
 @app.post("/ocr-multilingual")
