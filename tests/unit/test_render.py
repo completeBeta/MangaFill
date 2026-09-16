@@ -99,9 +99,13 @@ def test_caption_region_centers_on_vertical_caption():
     from app.pipeline.render import _caption_region
 
     # A tall vertical caption (问世间情为何物, 72x461) must get a WIDE strip (English
-    # is horizontal) roughly centered on the original text's vertical position.
+    # is horizontal) roughly centered on the original text's vertical position —
+    # but bounded to the source column's OWN footprint (2.5x its width + 24px).
+    # Before that bound it was lettered across a 691px strip and ran into the
+    # neighbouring panel's balloon (job-4 page 10: two texts on top of each other).
     x, y, w, h = _caption_region((754, 376, 72, 461), 1600, 2262)
-    assert w >= int(461 * 1.5)   # wide enough for horizontal English (tracks text length)
+    assert w >= int(72 * 2.5)   # wide enough for horizontal English
+    assert w <= int(h * 1.5)    # ...but never wider than the source's own length
     # strip's vertical centre is near the original text's centre
     assert abs((y + h // 2) - (376 + 461 // 2)) < h // 2 + 1
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from .fonts import resolve_font_path
@@ -118,15 +119,125 @@ def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):
         if singles <= 1:
             best_clean = (size, lines, font)
             break  # largest size with at most one lone-word line (scanning high -> low)
-    # Prefer FILLING the space. The lone-word marker is a useful aesthetic nudge in
-    # a roomy box, but in a genuinely narrow region it fires at almost every size,
-    # so honouring it unconditionally returns text far smaller than the region can
-    # hold — job-5 page 3: a 133x242 caption column lettered at 10px, wasting most
-    # of the space; the largest size that actually fits was 24px. Only take the
-    # clean size when it is not drastically smaller than the largest that fits.
-    if best_clean is not None and best is not None and best_clean[0] < 0.75 * best[0]:
-        return best
+    # NOTE (v0.27.8): the "prefer filling" rule added in v0.27.7 was removed from
+    # this rectangular path. It blew up text in regions that have NO boundary to
+    # respect — caption strips over artwork, free-floating mutter text — where a
+    # wide strip let a 1-line caption balloon to the page font cap and collide
+    # with neighbouring panels (job-4 page 10). Filling is now done properly by
+    # `_fit_shape`, which fits to the balloon's actual outline; a region with no
+    # shape keeps the aesthetic "no lone-word line" sizing it had in v0.27.6.
     return best_clean or best
+
+
+def _region_avail(gray: "np.ndarray", region: tuple, margin_frac: float = 0.04,
+                  light: int = 200, min_fill: float = 0.30):
+    """Lettering space inside the region's own light shape: (avail, box) or None.
+
+    Speech balloons are ovals/spiked blobs, so their bounding box is NOT the space
+    the lettering may use: text fitted to the bbox pokes out of the outline (the
+    oval is much narrower at the top/bottom rows than at its waist). This returns
+
+      * `box`  — the balloon interior's own bounding box (image coords), and
+      * `avail`— for every row of that box, how wide a centred line may be before
+                 it crosses the balloon's edge: `2 * min(run left, run right)`
+                 around the interior's centre column, minus a margin that scales
+                 with the region, so lettering never touches the outline.
+
+    The interior is the connected light(>200) region containing the region's
+    centre — the page handed here is already inpainted, so it is clean.
+
+    Returns None when there is no such shape (text over artwork, caption strips,
+    boxes that are all ink); callers then fall back to the rectangular fit.
+    """
+    x, y, w, h = [int(v) for v in region]
+    if not hasattr(gray, "shape"):  # accept a PIL image too
+        gray = np.asarray(gray)
+    gx0, gy0 = max(0, x), max(0, y)
+    gx1, gy1 = min(gray.shape[1], x + w), min(gray.shape[0], y + h)
+    if gx1 - gx0 < 8 or gy1 - gy0 < 8:
+        return None
+    crop = gray[gy0:gy1, gx0:gx1] >= light
+    ch, cw = crop.shape
+    cx0, cy0 = cw // 2, ch // 2
+    if not crop[cy0, cx0]:
+        return None
+
+    # Flood-fill the interior through light pixels (vectorised, no scipy: the
+    # worker container has no scipy).
+    visited = np.zeros_like(crop)
+    visited[cy0, cx0] = True
+    frontier = visited.copy()
+    while frontier.any():
+        grow = np.zeros_like(visited)
+        grow[1:, :] |= frontier[:-1, :]
+        grow[:-1, :] |= frontier[1:, :]
+        grow[:, 1:] |= frontier[:, :-1]
+        grow[:, :-1] |= frontier[:, 1:]
+        frontier = grow & crop & ~visited
+        visited |= frontier
+    if visited.sum() < min_fill * crop.size:
+        return None
+
+    # Trim to the interior's own bbox: the lettering is centred in the BALLOON, not
+    # in the (possibly looser) region box, and the width profile is then measured
+    # symmetrically about the balloon's own centre column.
+    ys, xs = np.where(visited)
+    by0, by1, bx0, bx1 = int(ys.min()), int(ys.max()), int(xs.min()), int(xs.max())
+    sub = visited[by0:by1 + 1, bx0:bx1 + 1]
+    bw, bh = bx1 - bx0 + 1, by1 - by0 + 1
+    cx = bw // 2
+    # Runs from the centre column outwards, per row (cumprod = run length).
+    left = np.cumprod(sub[:, :cx + 1][:, ::-1], axis=1).sum(axis=1)
+    right = np.cumprod(sub[:, cx:], axis=1).sum(axis=1)
+    avail = 2 * np.minimum(left, right) - 2
+    margin = max(2, int(min(w, h) * margin_frac))
+    avail = np.maximum(avail - 2 * margin, 0).astype(np.int32)
+    box = (gx0 + bx0, gy0 + by0, bw, bh)
+    return avail, box
+
+
+def _lines_fit_shape(probe, lines: list[str], font, avail, region_h: int, th: int) -> bool:
+    """True if every wrapped line fits the balloon's width at its own row band."""
+    n = len(lines)
+    if n == 0:
+        return False
+    top = max(0, (region_h - th) // 2)
+    band = th / n
+    for i, ln in enumerate(lines):
+        y0 = int(top + i * band)
+        y1 = min(region_h, max(y0 + 1, int(top + (i + 1) * band)))
+        allowed = int(avail[y0:y1].min()) if y1 > y0 else 0
+        if _text_w(probe, ln, font) > allowed:
+            return False
+    return True
+
+
+def _fit_shape(text: str, avail, region_h: int, font_path: str, max_font: int = 32):
+    """Largest font size whose wrapped lines all stay inside the balloon's shape.
+
+    This is what lets lettering FILL a balloon without escaping it: the target is
+    the shape, not the bounding box, so a big round balloon can be lettered much
+    larger than a rectangular inset would allow, while a spiky or oval one is
+    still never overrun.
+    """
+    max_w = int(avail.max())
+    if max_w < 12 or region_h < 8:
+        return None
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    for size in range(max_font, 7, -1):
+        font = ImageFont.truetype(font_path, size)
+        sw = max(1, size // 8)
+        lines = _wrap(probe, text, font, max_w)
+        joined = "\n".join(lines)
+        bb = probe.multiline_textbbox(
+            (0, 0), joined, font=font, spacing=2, align="center", stroke_width=sw
+        )
+        tw, th = bb[2] - bb[0], bb[3] - bb[1]
+        if tw > max_w or th > region_h:
+            continue
+        if _lines_fit_shape(probe, lines, font, avail, region_h, th):
+            return (size, lines, font)
+    return None
 
 
 def _draw_box(
@@ -137,6 +248,7 @@ def _draw_box(
     font_path: str | None,
     max_font: int,
     angle: float = 0.0,
+    avail=None,
 ):
     if not text or not text.strip():
         return
@@ -175,7 +287,16 @@ def _draw_box(
     # Dynamic per-box sizing: the largest size (capped at `max_font`) that fits
     # the box. Short text fills a big bubble; long text shrinks to fit a small
     # one. If nothing fits, fall back to 8px (may overflow) rather than blank.
-    fitted = _fit(text, max_w, max_h, font_path, max_font=max_font)
+    #
+    # When the caller knows the box's actual shape (`avail`, from `_region_avail`)
+    # the fit targets that shape instead of the rectangle: lettering fills an oval
+    # balloon to its curve without ever crossing the outline. Rectangles remain
+    # the fallback for slanted boxes and for regions with no enclosing shape.
+    fitted = None
+    if avail is not None and abs(angle) < 3.0:
+        fitted = _fit_shape(text, avail, h, font_path, max_font=max_font)
+    if fitted is None:
+        fitted = _fit(text, max_w, max_h, font_path, max_font=max_font)
     if fitted is None:
         font = ImageFont.truetype(font_path, 8)
         lines = _wrap(draw, text, font, max_w)
@@ -237,6 +358,7 @@ def typeset_page(
     font_id: str | None = None,
     regions: dict | None = None,
     only: set | None = None,
+    shapes: set | None = None,
 ) -> Image.Image:
     """Draw every translatable block's English translation into a copy of `image`.
 
@@ -245,6 +367,12 @@ def typeset_page(
 
     `regions` optionally maps id(block) -> (x, y, w, h) container (the bubble/box
     interior) to draw into. When omitted, each block's own bbox is used.
+
+    `shapes` optionally names the blocks whose `region` is a speech balloon (or a
+    flood-filled speech box) rather than a bare rectangle. For those, the lettering
+    is fitted to the balloon's actual outline (`_region_avail` / `_fit_shape`) so it
+    fills the balloon without crossing the outline. Blocks not listed keep the
+    rectangular fit.
 
     `only` optionally restricts drawing to a set of block ids (e.g. blocks the
     caller decided to typeset, excluding free-floating text left untouched).
@@ -256,6 +384,7 @@ def typeset_page(
     # font (capped at ~1/32 of page width) that fits, so a short line fills a big
     # bubble and long dialogue shrinks to fit a small one.
     cap = max(20, image.width // 32)
+    gray = None
     for b in blocks:
         if only is not None and id(b) not in only:
             continue
@@ -279,5 +408,15 @@ def typeset_page(
                 # text height, not the full-page cap — a short footnote should not
                 # blow up to the max size just because the caption region is wide.
                 bcap = min(cap, max(14, int(b.bbox[3] * 0.8)))
-        _draw_box(out, draw, region, text, fp, bcap, angle=b.angle)
+        avail = None
+        if shapes and id(b) in shapes and abs(b.angle) < 3.0:
+            if gray is None:
+                gray = np.asarray(out.convert("L"))
+            shape = _region_avail(gray, region)
+            if shape is not None:
+                avail, ebox = shape
+                # letter into the balloon's OWN box: it is centred on the balloon,
+                # not on the (possibly looser) detection box
+                region = ebox
+        _draw_box(out, draw, region, text, fp, bcap, angle=b.angle, avail=avail)
     return out

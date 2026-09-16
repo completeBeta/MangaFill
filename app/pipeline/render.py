@@ -705,7 +705,14 @@ def _caption_region(bbox: tuple, page_w: int, page_h: int) -> tuple:
         # is a proxy for char count), capped at 60% page. A fixed 60%-page strip
         # blew up SHORT vertical labels — a 2-char 大吉 (Great fortune) typeset
         # across a page-wide strip became an enormous font.
-        nw = max(w, min(int(h * 1.5), int(page_w * 0.6)))
+        #
+        # Also capped to the source column's OWN footprint (2.5x its width, plus a
+        # little breathing room): a tategaki column of mutter/narration over
+        # artwork (job-4 page 10: a 54x346 column) was being lettered clear across
+        # the strip and ran into the neighbouring panel's balloon — two texts on
+        # top of each other. Keeping the strip near the source keeps the English
+        # where the source was; the fit simply wraps at the narrower width.
+        nw = max(w, min(int(h * 1.5), int(page_w * 0.6), int(w * 2.5) + 24))
     else:
         nw = w
     nx = max(0, min(x, page_w - nw))  # keep it on-page
@@ -1002,6 +1009,9 @@ def render_translated_page(
     # ---- resolve typeset targets + erase boxes -------------------------------
     targets: list[tuple[TextBlock, tuple]] = []
     erase: list[tuple] = []
+    # Blocks whose region is a speech balloon (not a bare rectangle): the
+    # typesetter fits their lettering to the balloon's actual outline.
+    shaped: set[int] = set()
     if lang in ("ko", "zh"):
         # Webtoon/manhua: the OCR box is the TIGHT text region, not the speech
         # box. Resolve the enclosing speech box in order of trust:
@@ -1019,14 +1029,11 @@ def render_translated_page(
                 continue
             raw = find_parent_bubble(bubbles, b.bbox) if bubbles else None
             if raw is not None:
-                # Use the bubble as-is: `_draw_box` already insets each side by 15%
-                # of the bubble's smaller dimension to approximate the inscribed
-                # rectangle. Pre-insetting here too (the old `_inset_box`) stacked
-                # two 15-30% insets and threw away half the bubble's width — the
-                # lettering then sat small in the middle of a big empty balloon
-                # (job-5 page 3: a 201px-wide bubble gave text only 99px to work
-                # with, so a 3-line translation was lettered at 9px).
+                # The bubble's bbox, not the tight OCR box: the typesetter fits the
+                # lettering to the balloon's own outline (`shapes`), so the text
+                # fills the balloon as much as its curve allows without crossing it.
                 region = tuple(raw)
+                shaped.add(id(b))
             elif _is_drawn_sfx(b):
                 # Drawn sound effect / art text with no bubble: its OCR box is the
                 # footprint of the lettering on the art, so letter into that box at
@@ -1039,7 +1046,8 @@ def render_translated_page(
                 sb = find_speech_box(image_np, b.bbox)
                 if sb:
                     raw = sb
-                    region = tuple(sb)  # `_draw_box` insets once — see above
+                    region = tuple(sb)  # a real speech box — fit to its outline
+                    shaped.add(id(b))
                 else:
                     # Free-floating text on artwork (vertical caption or horizontal
                     # footnote) with no enclosing box: English is always horizontal,
@@ -1070,16 +1078,12 @@ def render_translated_page(
             else:
                 parent = find_parent_bubble(bubbles, b.bbox)
                 if parent is not None:
-                    # Inset the bubble's bounding box to approximate its inscribed
-                    # rectangle — ovals/spiked bubbles are narrower at the edges, so
-                    # fitting text to the full bbox spills over the outline.
-                    # NOTE: `_draw_box` applies that inset itself (15% of the
-                    # bubble's smaller dimension). Pre-insetting here as well stacked
-                    # two 15-30% insets, halving the usable width and leaving the
-                    # lettering small in the middle of a big empty balloon (job-5
-                    # page 3: a 201px bubble gave the text 99px, so a 3-line
-                    # translation was drawn at 9px).
+                    # The balloon's bbox, not an inset rectangle: the typesetter
+                    # fits the lettering to the balloon's actual curve (`shapes`),
+                    # so a big round bubble is lettered to fill it while an oval or
+                    # spiked one is never overrun.
                     region = tuple(parent)
+                    shaped.add(id(b))
                 else:
                     # Free text / caption: no bubble edge to avoid (see
                     # `_free_text_region` for the tall-narrow widening rule).
@@ -1125,7 +1129,8 @@ def render_translated_page(
     only = {id(b) for b, _region in targets}
     regions = {id(b): region for b, region in targets if region is not None}
     emit("typeset")
-    result = typeset_page(inpainted, blocks, font_id=font_id, regions=regions, only=only)
+    result = typeset_page(inpainted, blocks, font_id=font_id, regions=regions, only=only,
+                          shapes=shaped)
 
     # ---- paste carryover patches (previous page's bubble bottom halves) ------
     if carryover:

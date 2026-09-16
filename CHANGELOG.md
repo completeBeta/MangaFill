@@ -2,6 +2,45 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.8] - 2026-09-16
+
+### Fixed
+- **Lettering overflowed the balloon it was fitted to.** v0.27.7 sized text to the
+  balloon's *bounding box*, but a balloon is an oval or a spiked blob: much narrower
+  at its top and bottom rows than at its waist. On real manga pages the text poked
+  through the outline and ran into the neighbouring panel (job-4 pages 10/25/60 —
+  `I NEARLY DIED SO MANY TIMES, THOUGH…` was lettered to the page font cap and
+  printed on top of the next balloon's text). The fix targets the *shape*, not the
+  box:
+  - `typeset._region_avail` floods the balloon's light interior and returns, for
+    every row, how wide a centred line may be before it crosses the outline
+    (`2 * min(run left, run right)`, minus a margin that scales with the balloon).
+    It also returns the interior's own bounding box, so the lettering is centred on
+    the balloon rather than on the (looser) detection box.
+  - `typeset._fit_shape` picks the largest font size whose *every* wrapped line fits
+    its own row band — so a round balloon fills to its curve, while an oval or spiky
+    one is never overrun. `render.py` marks the balloon/flood-fill regions
+    (`shapes=`) and everything else keeps the rectangular fit.
+  - Sizing falls back to the rectangle when there is no interior to measure (text
+    over artwork, caption strips, slanted boxes) or when the fit finds nothing.
+- **The v0.27.7 "prefer filling" rule inflated regions that have no boundary to
+  respect.** Applied to a caption strip over artwork it blew a one-line caption up to
+  the page font cap, colliding with neighbouring panels. That rule is removed from
+  the rectangular path (v0.27.6 aesthetic sizing is back); filling is now done by the
+  shape fit, which is bounded by an actual outline.
+- **Free-floating vertical text sprawled across the page.** `_caption_region`
+  widened a tategaki column to `1.5 x its height` (up to 60% of the page). A 54x346
+  mutter column was therefore lettered across a 519px strip, over the neighbouring
+  balloon. The strip is now bounded by the source column's own footprint (2.5x its
+  width + 24px) so the English stays where the source text was.
+
+### Verified
+- 171 unit tests pass (7 new/updated: shape profile, per-line band fit, oval and
+  spiky-balloon containment, boundary-less sizing, caption strip bound).
+- A/B rendered on the isolated test instance against real pages from all three live
+  jobs (Japanese manga 00010/00025/00060, Korean webtoon pages 4/40, Chinese manhua
+  page 23): balloon lettering is filled *and* contained, where v0.27.7 overflowed.
+
 ## [0.27.7] - 2026-09-15
 
 ### Fixed
