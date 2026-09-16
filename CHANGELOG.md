@@ -2,6 +2,41 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.10] - 2026-09-16
+
+### Fixed
+- **The v0.27.9 missed-bubble recovery was too eager — it could letter a balloon
+  twice and could OCR artwork.** A scan over job 4's 193 pages flagged 19 candidate
+  balloons; reviewing every one on the real pages showed two failure modes:
+  - **Duplicate lettering.** A detection box can cover only PART of a balloon (page
+    92: the `bubble` box was the top line of a 3-line caption, so the caption block's
+    centre fell below it). The old "is any block's centre inside the bubble?" test then
+    reported "no text here" and the balloon was lettered a second time — English over
+    English. `_bubble_covered` now decides by **overlap** (a block ≥25% inside the
+    bubble, or ≥0.15 IoU), which catches the partial-box case.
+  - **Artwork misread as dialogue.** manga-ocr hallucinates plausible Japanese from
+    line-work and screentone: a balloon holding a drawn portrait read `うん．．．`, and
+    a starburst's drawn kanji read `讖`. `_ink_is_glyph_like` requires the ink inside
+    the balloon's deeper inset to **not touch the inset border** — a glyph sits with
+    white around it, artwork runs to the edge (measured: 真 6% ink / no border touch;
+    balloon artwork 25%, starburst 40% and a clipped caption 10% all touch). An ink
+    fraction **cap (18%)** additionally excludes drawn glyphs that fill the balloon
+    (the starburst measures 23%; real dialogue measures 1-11%, the reported 真 6%).
+  - `_recoverable_text` keeps the result to real dialogue: a lone KANA (の, ぅ, ぁ) is
+    a clipped fragment of a longer line and is rejected, a lone KANJI (真, 私, 若) is a
+    word or a name and is kept, and punctuation-only marks (～～〜〜！？) stay as-is.
+
+### Verified
+- 183 unit tests pass (5 new guard tests: overlap coverage, glyph-vs-artwork border
+  test, oversized-drawn-glyph cap, fragment/SFX rejection, artwork balloon skipped
+  without an OCR call).
+- Re-scanned job 4's 193 pages with the guards: **5** balloons recovered (pages 7, 88,
+  119, 148, 182) instead of 19 — the art balloon, the starburst and the clipped-caption
+  duplicate are all correctly left alone, and the reported 真 balloon still recovers.
+- Post-rollout screen on the v0.27.8 outputs: the un-erased-source page list is
+  byte-identical to the pre-rollout one (job 2 `[3,4,5,7,31,34,39,40,41,57,59,62,68,
+  85,100,102,103,121,124]`), i.e. the re-render introduced no new garbled-source pages.
+
 ## [0.27.9] - 2026-09-16
 
 ### Fixed

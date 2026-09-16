@@ -161,25 +161,103 @@ def _bubble_without_text(box: tuple, blocks: list[TextBlock]) -> bool:
     return True
 
 
-# A speech balloon holding a lone glyph (「真」 with its furigana まこと riding
-# beside it) is invisible to the text-region detector: it is not a text LINE, so
-# neither `text_bubble` nor `text_free` fires and no OCR is ever attempted. RT-DETR
-# still finds the balloon itself, so a bubble with no text block inside is the
-# signature of this whole miss class (job-5 page 3 sat untranslated through every
-# release). OCR'ing the balloon's interior directly recovers it.
+def _bubble_covered(box: tuple, blocks: list[TextBlock]) -> bool:
+    """True if a block already occupies the bubble — by OVERLAP, not just centre.
+
+    A detection box can cover only part of a balloon (job-4 page 92: the bubble box
+    was the top line of a 3-line caption, so the block's centre sat below it). Centre
+    containment then reports "no text here" and the fallback letters that balloon a
+    second time — English over English. Any block that is mostly inside the bubble
+    (or overlaps it substantially) counts as covering it.
+    """
+    for b in blocks:
+        bx, by, bw, bh = b.bbox
+        if bw <= 0 or bh <= 0:
+            continue
+        ix = max(0, min(box[0] + box[2], bx + bw) - max(box[0], bx))
+        iy = max(0, min(box[1] + box[3], by + bh) - max(box[1], by))
+        inter = ix * iy
+        if inter <= 0:
+            continue
+        if inter / (bw * bh) >= 0.25:
+            return True                      # block mostly inside the bubble
+        union = bw * bh + box[2] * box[3] - inter
+        if union and inter / union >= 0.15:  # or substantial mutual overlap
+            return True
+    return False
+
+
+# A balloon holding a lone glyph (「真」 with its furigana まこと riding beside it) is
+# invisible to the text-region detector: it is not a text LINE, so neither
+# `text_bubble` nor `text_free` fires and no OCR is ever attempted. RT-DETR still finds
+# the balloon, so "bubble with no text block inside" is the signature of this miss
+# class (job-5 page 3, job-4 page 7). OCR'ing the balloon interior directly recovers
+# it — but only for balloons that really hold a glyph, because OCR on artwork
+# hallucinates plausible Japanese out of line-work and screentone.
 _MIN_BUBBLE_INK = 0.004   # fraction of dark pixels — an empty balloon has none
+# ...and an UPPER bound: a drawn glyph that fills most of the balloon is ART (job-4
+# page 28's starburst kanji measures 23% ink; real dialogue glyphs measure 1-11%,
+# the reported 真 is 6%). Such a balloon is left as-is rather than risk lettering a
+# misread word over the drawing.
+_MAX_BUBBLE_INK = 0.18
+_KANA = re.compile(r"[\u3041-\u309f\u30a0-\u30ff]")
+_KANJI = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def _ink_is_glyph_like(gray: "np.ndarray", box: tuple) -> bool:
+    """True if the ink inside `box` looks like a text glyph, not artwork.
+
+    The discriminator that separates a glyph from a drawing (measured on the real
+    cases): **a glyph does not touch the box border**. A character sits inside the
+    balloon with white around it, while artwork — a portrait inside a balloon, a
+    starburst's drawn kanji, a caption box cropped mid-line — runs to the edge of any
+    inset you measure on. Measured: 真 ink 6% touches_border=False; balloon artwork
+    25%/40% and the cropped caption 10% all touch it.
+    """
+    x, y, w, h = [int(v) for v in box]
+    if not hasattr(gray, "shape"):
+        gray = np.asarray(gray)
+    H, W = gray.shape[:2]
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(W, x + w), min(H, y + h)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return False
+    patch = gray[y0:y1, x0:x1]
+    ink = patch < 128
+    if not ink.any():
+        return False
+    return not bool(ink[0, :].any() or ink[-1, :].any()
+                    or ink[:, 0].any() or ink[:, -1].any())
+
+
+def _recoverable_text(text: str) -> bool:
+    """Guard the OCR result: real dialogue, not a fragment or an SFX mark.
+
+    A lone KANA in a balloon is almost always one glyph of a longer line that the
+    detector clipped (の, ぅ, ぁ) — lettering "of" into that balloon is worse than
+    leaving it. A lone KANJI is a word or a name (真, 私, 若) and is the case this
+    exists for, so single kanji pass. Punctuation-only results (～～〜〜！？) are SFX
+    marks and stay as they are.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if len(t) >= 2:
+        return bool(_KANA.search(t) or _KANJI.search(t))
+    return bool(_KANJI.search(t))
 
 
 def _ocr_bubbles_without_text(image_np: np.ndarray, bubbles, blocks: list[TextBlock],
-                              ocr_fn=None, min_ink: float = _MIN_BUBBLE_INK) -> list[TextBlock]:
+                              ocr_fn=None, min_ink: float = _MIN_BUBBLE_INK,
+                              max_ink: float = _MAX_BUBBLE_INK) -> list[TextBlock]:
     """OCR balloons the text detector missed, so no speech bubble stays Japanese.
 
-    For every detected bubble that contains none of the already-detected text
-    blocks, OCR the balloon interior (inset to avoid the outline) and keep the
-    result when it reads as Japanese. Bubbles with no dark ink at all (empty
-    balloons, a bubble holding only art) are skipped without an OCR call — measured
-    on a deeper inset so the balloon's own outline can't be mistaken for text — and
-    the `_has_japanese` gate rejects OCR noise from art.
+    Runs only for a balloon that no detected block occupies (`_bubble_covered`) and
+    whose interior holds glyph-like ink (`_ink_is_glyph_like`) in a plausible amount
+    (between `min_ink` and `max_ink` — measured on the deeper inset so the balloon's
+    own outline is excluded) — artwork, empty balloons and drawn oversized glyphs
+    cost no OCR call. The result is kept when it reads as real dialogue
+    (`_recoverable_text` + `_has_japanese`).
     """
     if not bubbles:
         return []
@@ -188,29 +266,33 @@ def _ocr_bubbles_without_text(image_np: np.ndarray, bubbles, blocks: list[TextBl
     H, W = gray.shape[:2]
     out: list[TextBlock] = []
     for bb in sorted(bubbles, key=lambda b: -(b[2] * b[3])):
-        if not _bubble_without_text(bb, blocks) or not _bubble_without_text(bb, out):
+        bb = tuple(int(v) for v in bb)
+        if _bubble_covered(bb, blocks) or _bubble_covered(bb, out):
             continue
-        ix, iy, iw, ih = _inset_box(tuple(bb), 0.14, 0.12)
+        ix, iy, iw, ih = _inset_box(bb, 0.14, 0.12)
         x0, y0 = max(0, ix), max(0, iy)
         x1, y1 = min(W, ix + iw), min(H, iy + ih)
         if x1 - x0 < 12 or y1 - y0 < 12:
             continue
-        # Empty-balloon guard on a deeper inset: the outline curves into the corners
-        # of a shallow one, which would read as "ink" and OCR hallucinates kana on it.
-        kx, ky, kw, kh = _inset_box(tuple(bb), 0.22, 0.20)
-        px0, py0 = max(0, kx), max(0, ky)
-        px1, py1 = min(W, kx + kw), min(H, ky + kh)
-        patch = gray[py0:py1, px0:px1]
-        if patch.size == 0 or float((patch < 128).mean()) < min_ink:
-            continue  # empty balloon — nothing to read
+        kx, ky, kw, kh = _inset_box(bb, 0.22, 0.20)
+        # deeper inset: an empty balloon and a balloon full of artwork both measure
+        # zero ink here, and the outline cannot be mistaken for text
+        patch = gray[max(0, ky):ky + kh, max(0, kx):kx + kw]
+        if patch.size == 0:
+            continue
+        ink_frac = float((patch < 128).mean())
+        if ink_frac < min_ink or ink_frac > max_ink:
+            continue
+        if not _ink_is_glyph_like(gray, (kx, ky, kw, kh)):
+            continue  # artwork runs to the edge of the inset — not a glyph
         if ocr_fn is None:
             from .ocr import ocr_crop  # local: only pulls in torch/manga-ocr if needed
             ocr_fn = ocr_crop
         text, _conf = ocr_fn(image_np, (ix, iy, iw, ih))
         text = (text or "").strip()
-        if not text or not _has_japanese(text):
+        if not _has_japanese(text) or not _recoverable_text(text):
             continue
-        out.append(TextBlock(bbox=tuple(int(v) for v in (ix, iy, iw, ih)), text=text,
+        out.append(TextBlock(bbox=(ix, iy, iw, ih), text=text,
                              confidence=None, orientation="vertical"))
     return out
 
