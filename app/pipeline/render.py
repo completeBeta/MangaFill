@@ -151,6 +151,70 @@ def _drop_titles(blocks: list[TextBlock], page_h: int) -> list[TextBlock]:
     ]
 
 
+def _bubble_without_text(box: tuple, blocks: list[TextBlock]) -> bool:
+    """True if no block's centre falls inside the bubble `box`."""
+    cx, cy = box[0] + box[2] / 2, box[1] + box[3] / 2
+    for b in blocks:
+        bcx, bcy = b.bbox[0] + b.bbox[2] / 2, b.bbox[1] + b.bbox[3] / 2
+        if box[0] <= bcx <= box[0] + box[2] and box[1] <= bcy <= box[1] + box[3]:
+            return False
+    return True
+
+
+# A speech balloon holding a lone glyph (「真」 with its furigana まこと riding
+# beside it) is invisible to the text-region detector: it is not a text LINE, so
+# neither `text_bubble` nor `text_free` fires and no OCR is ever attempted. RT-DETR
+# still finds the balloon itself, so a bubble with no text block inside is the
+# signature of this whole miss class (job-5 page 3 sat untranslated through every
+# release). OCR'ing the balloon's interior directly recovers it.
+_MIN_BUBBLE_INK = 0.004   # fraction of dark pixels — an empty balloon has none
+
+
+def _ocr_bubbles_without_text(image_np: np.ndarray, bubbles, blocks: list[TextBlock],
+                              ocr_fn=None, min_ink: float = _MIN_BUBBLE_INK) -> list[TextBlock]:
+    """OCR balloons the text detector missed, so no speech bubble stays Japanese.
+
+    For every detected bubble that contains none of the already-detected text
+    blocks, OCR the balloon interior (inset to avoid the outline) and keep the
+    result when it reads as Japanese. Bubbles with no dark ink at all (empty
+    balloons, a bubble holding only art) are skipped without an OCR call — measured
+    on a deeper inset so the balloon's own outline can't be mistaken for text — and
+    the `_has_japanese` gate rejects OCR noise from art.
+    """
+    if not bubbles:
+        return []
+    gray = image_np if image_np.ndim == 2 else np.asarray(
+        Image.fromarray(image_np).convert("L"))
+    H, W = gray.shape[:2]
+    out: list[TextBlock] = []
+    for bb in sorted(bubbles, key=lambda b: -(b[2] * b[3])):
+        if not _bubble_without_text(bb, blocks) or not _bubble_without_text(bb, out):
+            continue
+        ix, iy, iw, ih = _inset_box(tuple(bb), 0.14, 0.12)
+        x0, y0 = max(0, ix), max(0, iy)
+        x1, y1 = min(W, ix + iw), min(H, iy + ih)
+        if x1 - x0 < 12 or y1 - y0 < 12:
+            continue
+        # Empty-balloon guard on a deeper inset: the outline curves into the corners
+        # of a shallow one, which would read as "ink" and OCR hallucinates kana on it.
+        kx, ky, kw, kh = _inset_box(tuple(bb), 0.22, 0.20)
+        px0, py0 = max(0, kx), max(0, ky)
+        px1, py1 = min(W, kx + kw), min(H, ky + kh)
+        patch = gray[py0:py1, px0:px1]
+        if patch.size == 0 or float((patch < 128).mean()) < min_ink:
+            continue  # empty balloon — nothing to read
+        if ocr_fn is None:
+            from .ocr import ocr_crop  # local: only pulls in torch/manga-ocr if needed
+            ocr_fn = ocr_crop
+        text, _conf = ocr_fn(image_np, (ix, iy, iw, ih))
+        text = (text or "").strip()
+        if not text or not _has_japanese(text):
+            continue
+        out.append(TextBlock(bbox=tuple(int(v) for v in (ix, iy, iw, ih)), text=text,
+                             confidence=None, orientation="vertical"))
+    return out
+
+
 def _split_bullet_lines(blocks: list[TextBlock]) -> list[TextBlock]:
     """Split bullet-separated stat text (●筋力Ｂ＋●持久力Ｂ...) into per-line
     blocks so each stat typesets on its own line instead of wrapping as one
@@ -941,6 +1005,12 @@ def render_translated_page(
         )
     )
     if lang == "ja":
+        # Balloons holding a lone glyph + furigana are invisible to the text-region
+        # detector, so RT-DETR finds the balloon but nothing ever OCRs it and the
+        # bubble stays Japanese (job-5 page 3: 「真」/まこと). Recover them by OCR'ing
+        # the balloon interior directly — see `_ocr_bubbles_without_text`.
+        if bubbles:
+            blocks = blocks + _ocr_bubbles_without_text(image_np, bubbles, blocks)
         # Large stylized titles/logos (series title, section headers) are
         # mis-OCR'd by manga-ocr, so leave them untouched — but only for
         # Japanese. Korean/Chinese webtoon dialogue is horizontal and always

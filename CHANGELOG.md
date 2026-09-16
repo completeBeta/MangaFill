@@ -2,6 +2,39 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.9] - 2026-09-16
+
+### Fixed
+- **A speech balloon holding a lone glyph was never translated.** Job-5 page 3 has a
+  balloon with a single large 真 and its furigana まこと beside it; it sat in Japanese
+  through every release. RT-DETR *does* find the balloon, but the text-region detector
+  only fires on text *lines* — one big glyph with ruby beside it is not a line, so
+  neither `text_bubble` nor `text_free` produced a region and **no OCR was ever
+  attempted**. Verified by handing the worker a crop of just that balloon, upscaled
+  2x: it returns the bubble and **zero** text blocks. (A second, latent trap: the
+  worker discards any OCR result of a single character — `len(text.strip()) <= 1` —
+  so a one-glyph balloon would have been dropped even if its region had been found.)
+  `render._ocr_bubbles_without_text` closes the whole class: after the normal
+  detect+OCR pass, every detected balloon that contains **no** text block has its
+  interior OCR'd directly (inset crop, so the text isn't clipped and the balloon
+  outline is excluded) and becomes a block when it reads as Japanese. Empty balloons
+  cost no OCR call — an ink gate measured on a *deeper* inset skips them, because the
+  outline curves into the corners of a shallow crop and manga-ocr will hallucinate
+  kana on a blank balloon.
+
+### Verified
+- 178 unit tests pass (7 new: coverage detection, recovery, empty-balloon skip,
+  no re-OCR of an already-OCR'd balloon, non-Japanese rejection, fixture guard).
+- Rendered job-5 page 3 end to end: 14 -> 15 blocks, and the 真/まこと balloon is now
+  lettered in English with the source and furigana erased, text centred inside the
+  outline.
+
+### Known limitation
+- manga-ocr reads 真 but not the ruby まこと (at a shallow crop the furigana merges into
+  garbage — it returned `真っ赤に`), so the on'yomi "SHIN" was lettered rather than the
+  name "Makoto". Feeding furigana to the translator as a reading hint is a separate
+  change and would fix proper nouns generally.
+
 ## [0.27.8] - 2026-09-16
 
 ### Fixed
