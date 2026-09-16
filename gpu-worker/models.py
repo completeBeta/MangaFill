@@ -84,15 +84,18 @@ def _to_xywh(box) -> tuple:
 # letters it onto the artwork (job-4 pages 118/144/43/152/47 — page 118 got five
 # overlapping copies of one line drawn onto a clean panel). Measured over nine such
 # pages at a 0.05 threshold: every phantom detection is `text_free`, 13-40px wide,
-# 95-560px tall and scores 0.20-0.43, while genuine free text on the same pages reaches
-# 0.94 and only dips below 0.45 when it is compact or wide (a 34x130 chart caption at
-# 0.451, a 51x154 drawn SFX at 0.253, 51px-wide mutter columns at 0.231). So narrow-and-
-# tall free text has to clear a real score; everything else keeps the low 0.2 bar that
+# 81-560px tall and scores 0.20-0.43, while genuine free text on the same pages reaches
+# 0.94 and only dips below 0.44 when it is compact or wide (a 34x130 chart caption at
+# 0.451, a 51x154 drawn SFX at 0.253, 51px-wide mutter columns at 0.231; a real 31x76
+# `うん` in a bubble sits just under the height bar). The 48px ceiling splits the measured
+# gap — phantoms run 13-48px wide, the narrowest REAL free text in the sample is 51px —
+# so narrow-and-tall free text has to clear a real score; everything else keeps the low
+# 0.2 bar that
 # exists so tiny single-character SFX (ほえ, はっ, コヒュ at 0.3-0.45) survive.
 # Mirrored in the app's app/pipeline/detector.py — keep the two in step.
-TEXT_FREE_TALL_MIN_SCORE = 0.45
-TEXT_FREE_TALL_MAX_W = 40
-TEXT_FREE_TALL_MIN_H = 90
+TEXT_FREE_TALL_MIN_SCORE = 0.44
+TEXT_FREE_TALL_MAX_W = 48
+TEXT_FREE_TALL_MIN_H = 80
 
 
 def is_halftone_prone_text_free(w: int, h: int, score: float | None) -> bool:
