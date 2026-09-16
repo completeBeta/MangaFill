@@ -2,6 +2,42 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.7] - 2026-09-15
+
+### Fixed
+- **Lettering did not fill the space it had.** Two independent causes, both
+  throwing away usable area, so translations sat small in the middle of roomy
+  balloons (job-5 page 3 was the visible case: a 201px-wide bubble lettered at
+  **9px**, and a 133x242 caption column at **10px**):
+  1. **The region was inset twice.** The renderer pre-inset the parent bubble with
+     `_inset_box` (15% of width, 12% of height), then `_draw_box` inset *again* by
+     15% of the smaller dimension. A 201px bubble handed the text just **99px**.
+     The bubble is now passed through as-is; `_draw_box` applies the single inset
+     that approximates the inscribed rectangle — the same margin the caption path
+     always used.
+  2. **`_fit` preferred a clean wrap over filling the box.** It returns the largest
+     size with at most one single-word line. That is a sensible nudge in a roomy
+     box, but in a narrow region the lone-word marker fires at nearly every size, so
+     the scan bottomed out below what fits. The clean size is now only preferred
+     when it is not drastically smaller than the largest that fits (>= 75%).
+     Measured on identical boxes, old -> new:
+
+     | box | old | new | text |
+     |---|---|---|---|
+     | 93x202 | 9px | **14px** | "Twelve years ago, Munakata Kyudo Dojo" |
+     | 171x257 | 15px | **23px** | "This time he collapsed just from lightly running around…" |
+     | 108x158 | 11px | **16px** | "That frailness of yours-" |
+     | 200x120 | 28px | 28px | roomy box — unchanged |
+     | 300x200 | 35px | 35px | roomy box — unchanged |
+
+     Roomy boxes are deliberately untouched; only genuinely narrow regions gain.
+     Measured end to end on job-5 page 3 (same translations): every balloon's text
+     is substantially larger, fills its white space, and still sits inside the
+     outlines.
+- **A stray aside found while testing:** the renderer's `_inset_box` is no longer
+  called by either the ja or the ko/zh path (kept, with its unit tests, for the
+  inset helper itself).
+
 ## [0.27.6] - 2026-09-15
 
 ### Fixed

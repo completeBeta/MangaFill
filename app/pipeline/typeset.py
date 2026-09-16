@@ -118,6 +118,14 @@ def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):
         if singles <= 1:
             best_clean = (size, lines, font)
             break  # largest size with at most one lone-word line (scanning high -> low)
+    # Prefer FILLING the space. The lone-word marker is a useful aesthetic nudge in
+    # a roomy box, but in a genuinely narrow region it fires at almost every size,
+    # so honouring it unconditionally returns text far smaller than the region can
+    # hold — job-5 page 3: a 133x242 caption column lettered at 10px, wasting most
+    # of the space; the largest size that actually fits was 24px. Only take the
+    # clean size when it is not drastically smaller than the largest that fits.
+    if best_clean is not None and best is not None and best_clean[0] < 0.75 * best[0]:
+        return best
     return best_clean or best
 
 

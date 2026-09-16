@@ -1019,7 +1019,14 @@ def render_translated_page(
                 continue
             raw = find_parent_bubble(bubbles, b.bbox) if bubbles else None
             if raw is not None:
-                region = _inset_box(raw)
+                # Use the bubble as-is: `_draw_box` already insets each side by 15%
+                # of the bubble's smaller dimension to approximate the inscribed
+                # rectangle. Pre-insetting here too (the old `_inset_box`) stacked
+                # two 15-30% insets and threw away half the bubble's width — the
+                # lettering then sat small in the middle of a big empty balloon
+                # (job-5 page 3: a 201px-wide bubble gave text only 99px to work
+                # with, so a 3-line translation was lettered at 9px).
+                region = tuple(raw)
             elif _is_drawn_sfx(b):
                 # Drawn sound effect / art text with no bubble: its OCR box is the
                 # footprint of the lettering on the art, so letter into that box at
@@ -1032,7 +1039,7 @@ def render_translated_page(
                 sb = find_speech_box(image_np, b.bbox)
                 if sb:
                     raw = sb
-                    region = _inset_box(sb)
+                    region = tuple(sb)  # `_draw_box` insets once — see above
                 else:
                     # Free-floating text on artwork (vertical caption or horizontal
                     # footnote) with no enclosing box: English is always horizontal,
@@ -1066,7 +1073,13 @@ def render_translated_page(
                     # Inset the bubble's bounding box to approximate its inscribed
                     # rectangle — ovals/spiked bubbles are narrower at the edges, so
                     # fitting text to the full bbox spills over the outline.
-                    region = _inset_box(parent)
+                    # NOTE: `_draw_box` applies that inset itself (15% of the
+                    # bubble's smaller dimension). Pre-insetting here as well stacked
+                    # two 15-30% insets, halving the usable width and leaving the
+                    # lettering small in the middle of a big empty balloon (job-5
+                    # page 3: a 201px bubble gave the text 99px, so a 3-line
+                    # translation was drawn at 9px).
+                    region = tuple(parent)
                 else:
                     # Free text / caption: no bubble edge to avoid (see
                     # `_free_text_region` for the tall-narrow widening rule).
