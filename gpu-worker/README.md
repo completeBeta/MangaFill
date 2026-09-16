@@ -50,6 +50,11 @@ docker pull ghcr.io/completebeta/manga-fill-gpu:rocm     # AMD RX 6000/7000/9000
 docker pull ghcr.io/completebeta/manga-fill-gpu:cpu      # no GPU
 ```
 
+Those are floating tags that follow the newest release. Each release also
+publishes a pinned tag per flavour carrying the **Manga Fill version**, e.g.
+`ghcr.io/completebeta/manga-fill-gpu:pascal-v0.27.13`. The worker's own version
+(`/health` -> `version`, e.g. `0.3.2`) is not part of the image tag.
+
 See **[SETUP_GUIDE.md](SETUP_GUIDE.md)** for the full run steps (Unraid / Linux /
 AMD passthrough). Building from source is still supported for developers via the
 `Dockerfile*` + compose profiles (`docker compose --profile <nvidia|pascal|rocm|cpu> up -d`).

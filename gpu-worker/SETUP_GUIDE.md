@@ -13,6 +13,14 @@ the worker is ever down, the app silently falls back to CPU — so this is a
 > `ghcr.io/completebeta/manga-fill-gpu:<tag>` (tags: `latest`, `pascal`, `rocm`,
 > `cpu`). The `docker build` commands below are only for developers building from
 > source.
+>
+> **Image tags follow the Manga Fill RELEASE version, not the worker's own version.**
+> Each release publishes a pinned and a floating tag per flavour: `pascal-v0.27.13`
+> and `pascal` (the floating tag always points at the newest release). The worker's
+> internal version — what `/health` reports, e.g. `0.3.2` — is **not** part of the
+> image tag: there is no `pascal-v0.3.2`. To pick up a worker fix, use the release
+> tag for the Manga Fill version that contains it (see the CHANGELOG), or just stay
+> on the floating `latest` / `pascal` / `rocm` / `cpu` tag and re-pull.
 
 ---
 
