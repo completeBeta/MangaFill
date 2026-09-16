@@ -102,6 +102,9 @@ the worker is ever down, the app silently falls back to CPU — so this is a
    - **Port:** add a mapping — host `9001` → container `9001`.
    - **Apply.**
 
+   (Or skip the build entirely and use a pre-built image — see
+   *Add Container on Unraid — field by field* below.)
+
 ### 2b. On plain Linux (compose)
 
 ```bash
@@ -142,6 +145,9 @@ PyTorch 2.6+, so this image pins the last compatible torch (2.5.1).
    - **Port:** host `9001` → container `9001`.
    - **Apply.**
 
+   (Or skip the build entirely and pull the pre-built image — see
+   *Add Container on Unraid — field by field* below.)
+
 ### On plain Linux
 
 ```bash
@@ -155,6 +161,45 @@ docker compose --profile pascal up -d
 > NVIDIA card uses the default image (2.7.1).
 
 ---
+
+---
+
+## Add Container on Unraid — field by field (pre-built image)
+
+You do **not** need to build anything: GHCR publishes a ready image per flavour.
+These are all the fields that matter — everything else stays at Unraid's default.
+
+| Field | Value |
+| --- | --- |
+| **Name** | `manga-fill-gpu` |
+| **Repository** | `ghcr.io/completebeta/manga-fill-gpu:pascal-v0.27.13` — swap `pascal` for `latest` (RTX 20/30/40/50), `rocm` (AMD) or `cpu`. See the tag note at the top of this guide. |
+| **Network Type** | `Bridge` |
+| **Extra Parameters** | `--runtime=nvidia` (`--gpus=all` also works on Unraid) |
+| Port — Advanced view → "Add another Port" | Container `9001`, Host `9001`, TCP |
+| Variable — "Add another Variable" | `NVIDIA_VISIBLE_DEVICES` = `all` (or your GPU's UUID) |
+| Variable — "Add another Variable" | `NVIDIA_DRIVER_CAPABILITIES` = `all` |
+| Variable — "Add another Variable" | `TZ` = your timezone, e.g. `Australia/Sydney` |
+
+**Apply** (the pull is ~3-5 GB), then set the container to **Autostart** on the
+Docker tab so it comes back after a reboot. No volume or path mappings are needed.
+
+Verify from a terminal on the box, and point Manga Fill at it if you haven't already:
+
+```bash
+curl -s localhost:9001/health   # -> {"status":"ok","device":"cuda",...,"version":"0.3.2"}
+```
+
+> **If a container vanishes after you edit it, the repository tag was wrong.**
+> Unraid removes the old container *before* it starts the replacement, so a tag
+> that doesn't exist leaves you with nothing at all. The worker's own version
+> (what `/health` reports, e.g. `0.3.2`) is **never** part of the image tag — tags
+> carry the *Manga Fill release*: `pascal-v0.27.13`, `pascal-v0.27.12`, … or the
+> floating `pascal` / `latest` / `rocm` / `cpu`. Check before you apply:
+>
+> ```bash
+> docker manifest inspect ghcr.io/completebeta/manga-fill-gpu:pascal-v0.27.13 >/dev/null \
+>   && echo "tag exists" || echo "BAD TAG — do not apply"
+> ```
 
 ## Step 4 — AMD (RX 6000 / 7000 / 9000)
 
