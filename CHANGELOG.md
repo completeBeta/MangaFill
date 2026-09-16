@@ -2,6 +2,53 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.13] - 2026-09-16
+
+### Fixed
+- **The detector no longer treats halftone screentone as free-floating text.** RT-DETR-v2
+  fires repeatedly over a screentone patch, and manga-ocr then reads a plausible phrase
+  out of the dots, so the lettering was drawn onto clean artwork — job-4 page 118 carried
+  five overlapping copies of one line, and pages 144/43/152/47 were speckled with the same
+  phantom family (`そういえば`/`そういうこと`/`それでも`). A narrow-and-tall `text_free`
+  region must now clear a real detector score (width ≤ 48px, height ≥ 80px, score < 0.44
+  → dropped); every other region keeps the deliberately low 0.2 threshold that exists so
+  tiny single-character SFX (`ほえ`, `はっ`, `コヒュ` at 0.3-0.45) survive.
+  Measured over nine such pages at a 0.05 threshold: every phantom detection is
+  `text_free`, 13-48px wide, 81-560px tall, score 0.20-0.43, while genuine free text on
+  the same pages reaches 0.94 and only dips below 0.44 when it is compact or wide (a
+  34x130 chart caption at 0.451, a 51x154 drawn SFX at 0.253, 51px-wide mutter columns at
+  0.231). The 48px ceiling splits the measured width gap (phantoms ≤48px, narrowest real
+  free text 51px). 67 of 68 phantom detections are filtered, and the four real-looking
+  blocks the rule also drops were each checked at 5x zoom — all four are screentone.
+- Implemented in the GPU worker (`gpu-worker/models.py`, worker 0.3.2) and mirrored in
+  the app's own detector so a CPU-only install behaves identically. `/detect-ocr` now
+  reports `dropped_halftone`, so the filter is visible in the response instead of
+  silently losing regions.
+
+### Changed
+- `detect_containers` carries the detector scores through (previously discarded) — that
+  is what makes a score-aware floor possible at all.
+
+### Notes
+- **Needs a GPU-worker rebuild to take effect in production** (`docker compose build &&
+  docker compose up -d` on the worker host — see the worker's SETUP_GUIDE). Until then
+  deployments keep worker 0.3.1, where the v0.27.12 duplicate collapse already limits
+  this defect to one lettering per region.
+- Residual risk (none seen in testing): a phantom strip WIDER than 48px or SHORTER than
+  80px with a weak score still letters — the window has to stop somewhere, and it stops
+  where the measurements separate halftone from the narrowest genuine free text (51px, a
+  drawn バキニ SFX). Catching that tail needs a model-side change, not a threshold.
+
+### Verified
+- 204 unit tests pass (6 new: the measured phantom boxes are filtered, the measured real
+  free text survives, the boundary is exclusive at the floor, a missing score never
+  filters, `bubble`/`text_bubble` are never touched by this rule, and `detect_containers`
+  counts what it drops).
+- The modified worker was run **on CPU** (no GPU needed, nothing in prod touched) against
+  the nine pages that produced the phantoms: `dropped_halftone` fires on each (0 on a
+  clean control page, 3-65 on the affected ones) and every phantom-family reading
+  disappears except page 113's 51px leaf patch noted above.
+
 ## [0.27.12] - 2026-09-16
 
 ### Fixed
