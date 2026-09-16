@@ -19,6 +19,7 @@ models, so a down GPU never breaks a job.
 """
 from __future__ import annotations
 
+import difflib
 import re
 
 import numpy as np
@@ -131,6 +132,156 @@ def _dedup_blocks(blocks: list[TextBlock]) -> list[TextBlock]:
         kept.append(b)
     kept.sort(key=lambda b: (b.bbox[1], -b.bbox[0]))
     return kept
+
+
+# Punctuation/marks carry no evidence of *which* utterance this is: manga-ocr's
+# screentone hallucinations and real lines differ only in their kana/kanji.
+_DUP_PUNCT = re.compile(r"[\s、。．，,\.！？!?…‥ー〜～「」『』（）()\[\]【】・:;'\"-]")
+
+
+def _norm_utterance(text: str) -> str:
+    """The string with all punctuation and spaces removed, for comparing two
+    detections: 'そういえば、' and 'そういえば．．．' are the SAME utterance."""
+    return _DUP_PUNCT.sub("", text or "")
+
+
+def _same_utterance(a: str, b: str, ratio: float = 0.75) -> bool:
+    """True if two OCR results read as the same line (identical, or near-identical
+    once punctuation is stripped). Length similarity is required first so that a
+    whole region and its sub-lines — the worker returns both — never count as the
+    same utterance, however much they share."""
+    na, nb = _norm_utterance(a), _norm_utterance(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    if min(len(na), len(nb)) / max(len(na), len(nb)) < 0.6:
+        return False
+    return difflib.SequenceMatcher(None, na, nb).ratio() >= ratio
+
+
+def _text_truncates(long_text: str, short_text: str) -> bool:
+    """True if `short_text` is a truncated reading of `long_text`.
+
+    Two detections over one region where the shorter is a prefix/slice of the longer
+    is a duplicated read, not two lines (job-4 page 60: 'あってますけど！！' inside
+    'あってますけど！！なんでそれはわかるかなあ！'). The same shape appears when the
+    worker returns a region and its individual lines — dropping the contained reading
+    is what ``_dedup_blocks`` already does for the nested case."""
+    a, b = _norm_utterance(long_text), _norm_utterance(short_text)
+    return len(b) >= 2 and len(b) < len(a) and b in a
+
+
+def _duplicate_clusters(blocks: list[TextBlock]) -> list[list[int]]:
+    """Groups of blocks the detector emitted more than once for one region.
+
+    Membership needs BOTH signals: the boxes must overlap substantially, and the two
+    readings must be related (same utterance, or one a truncated read of the other).
+    `_dedup_blocks` alone misses these because its thresholds (IoU > 0.5 /
+    containment > 0.85) assume nested output, while the screentone failure is a run of
+    boxes jittered a few px — they cover 25-70% of the smaller box (job-4 page 118:
+    six boxes across 80px, chained, so union-find is used). The text requirement keeps
+    genuinely distinct adjacent columns out, and the 0.25 containment floor keeps
+    blocks that merely clip a corner apart (job-4 page 58 has two drawn `ふる` SFX
+    whose boxes touch over 12x1px — those are two different glyphs, not a duplicate).
+    """
+    n = len(blocks)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def related(a: TextBlock, b: TextBlock) -> bool:
+        return (_same_utterance(a.text, b.text)
+                or _text_truncates(a.text, b.text)
+                or _text_truncates(b.text, a.text))
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = blocks[i], blocks[j]
+            if _box_containment(a.bbox, b.bbox) <= 0.25:
+                continue
+            if not related(a, b):
+                continue
+            ri, rj = find(i), find(j)
+            if ri != rj:
+                parent[rj] = ri
+    clusters: dict[int, list[int]] = {}
+    for i in range(n):
+        clusters.setdefault(find(i), []).append(i)
+    return [m for m in clusters.values() if len(m) > 1]
+
+
+def _collapse_duplicate_blocks(blocks: list[TextBlock]) -> list[TextBlock]:
+    """Letter a repeated detection once — and drop a degenerate repeat entirely.
+
+    Left alone, every duplicate is translated and lettered into the same spot, so a
+    page carries several overlapping copies of one English line (job-4 page 118: six
+    boxes over 80x240px of pure screentone → five overlapping "SPEAKING OF WHICH,",
+    drawn onto artwork that holds no text at all). Two rules:
+      * a group of 2+ blocks reading as the same utterance keeps its most complete
+        text — the longest reading wins, so a truncated duplicate is dropped (job-4
+        page 60: 'あってますけど！！' inside 'あってますけど！！なんでそれはわかるかなあ！');
+      * if a cluster contains 3+ blocks with an IDENTICAL reading the whole cluster
+        goes: a genuine line is never detected three times in one place, so this is
+        a detector/OCR repetition artefact, and keeping one copy would letter English
+        onto artwork that holds no text.
+    Deliberately geometric+textual only. A pixel-texture test for "is this really
+    text?" was tried and measured — it does NOT separate halftone from real
+    thin-stroke glyphs (a real 31x76 'うん' scores the same as screentone), so a
+    single phantom that appears ONCE is left alone rather than risk a real line.
+    """
+    if len(blocks) <= 1:
+        return blocks
+    drop: set[int] = set()
+    for members in _duplicate_clusters(blocks):
+        groups: list[list[int]] = []
+        for i in members:
+            for g in groups:
+                if _same_utterance(blocks[i].text, blocks[g[0]].text):
+                    g.append(i)
+                    break
+            else:
+                groups.append([i])
+        if any(len(g) >= 3 and len({_norm_utterance(blocks[i].text) for i in g}) == 1
+               for g in groups):
+            # Degenerate cluster: 3+ identical readings for one region is a detector
+            # artefact over art, so the whole run goes — along with any OTHER short
+            # block overlapping the run's footprint (job-4 page 118: the 6th box,
+            # reading そういうことで、, sits across the end of the run).
+            drop.update(members)
+            ux0 = min(blocks[i].bbox[0] for i in members)
+            uy0 = min(blocks[i].bbox[1] for i in members)
+            ux1 = max(blocks[i].bbox[0] + blocks[i].bbox[2] for i in members)
+            uy1 = max(blocks[i].bbox[1] + blocks[i].bbox[3] for i in members)
+            union = (ux0, uy0, ux1 - ux0, uy1 - uy0)
+            for i, b in enumerate(blocks):
+                if i in drop or _glyph_count(b.text) > 8:
+                    continue
+                if _box_containment(b.bbox, union) > 0.25:
+                    drop.add(i)
+            continue
+        survivors: list[int] = []
+        for g in groups:
+            if len(g) <= 1:
+                survivors.extend(g)
+                continue
+            best = max(g, key=lambda i: (_glyph_count(blocks[i].text),
+                                         blocks[i].bbox[2] * blocks[i].bbox[3]))
+            survivors.append(best)
+            drop.update(i for i in g if i != best)
+        # A survivor that is only a truncated read of another survivor is dropped:
+        # one reading per region, and the most complete one wins.
+        for i in survivors:
+            if any(j != i and _text_truncates(blocks[j].text, blocks[i].text)
+                   for j in survivors):
+                drop.add(i)
+    if not drop:
+        return blocks
+    return [b for i, b in enumerate(blocks) if i not in drop]
 
 
 def _drop_titles(blocks: list[TextBlock], page_h: int) -> list[TextBlock]:
@@ -1114,6 +1265,12 @@ def render_translated_page(
             _drop_non_japanese(blocks), page_w, page_h
         )
     )
+    # ...then collapse repeats of the SAME utterance the detector emitted for one
+    # region (halftone screentone makes the OCR box detector fire 2-6 times with a
+    # few px of jitter). Each copy is translated and lettered into the same spot
+    # otherwise — job-4 page 118 ended up with five overlapping copies of
+    # "SPEAKING OF WHICH," over artwork that holds no text at all.
+    blocks = _collapse_duplicate_blocks(blocks)
     if lang == "ja":
         # Balloons holding a lone glyph + furigana are invisible to the text-region
         # detector, so RT-DETR finds the balloon but nothing ever OCRs it and the

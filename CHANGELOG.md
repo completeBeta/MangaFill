@@ -2,6 +2,43 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.12] - 2026-09-16
+
+### Fixed
+- **The same line could be lettered several times over one spot — onto artwork that
+  holds no text at all.** Manga-ocr's box detector fires repeatedly over halftone
+  screentone and returns 2-6 overlapping boxes that all read the same phrase (job-4
+  page 118: six `そういえば`/`そういうことで` boxes across 80x240px of pure dots — at 5x
+  zoom there are no characters there at all). Each copy was translated and typeset, so
+  the page carried five overlapping "SPEAKING OF WHICH," drawn over a clean panel.
+  `_collapse_duplicate_blocks` now clusters boxes that overlap by more than 25% and
+  read as the same utterance (punctuation-insensitive: `そういえば、` and
+  `そういえば．．．` are one line), keeps only the most complete reading, drops a reading
+  that is merely a truncated version of a fuller one, and — when 3+ boxes in a cluster
+  read *identically*, which never happens for genuine text — discards the whole run
+  including any short block overlapping its footprint.
+
+### Notes
+- Deliberately **no pixel-texture test** for "is this really text?": a "no glyph
+  strokes ⇒ halftone" filter was built and measured against the real blocks and would
+  have dropped 443 job-4 blocks — including correctly-lettered SFX (`啪`→SMACK,
+  `啊`→Ah, `主人`→Master.) — because a real thin-stroke glyph and a halftone dot are
+  not separable that way. A phantom that is detected exactly **once** is therefore
+  left alone: it is indistinguishable from real text without a detector-side signal.
+  Residual measured on job 4: single detections of this family still letter (page 144
+  has several across its panels). Stopping those needs a confidence/size floor in the
+  GPU worker's `/detect-ocr`, tracked as a follow-up.
+
+### Verified
+- 198 unit tests pass (12 new, using the real failing boxes: the page-118 run, the
+  page-113 cluster, the page-60 truncated duplicate, and the cases that must be
+  untouched — the same line in two balloons, two `ふる` SFX boxes clipping a corner,
+  distinct adjacent columns, a full line next to a phantom run).
+- Dry run over every stored block of jobs 2/3/4: job 2 collapses 0, job 3 collapses 0,
+  job 4 collapses 30 — all of them the screentone phantom family, none a reading longer
+  than a short phrase.
+- Re-rendered the affected job-4 pages and compared ORIGINAL | BEFORE | AFTER crops.
+
 ## [0.27.11] - 2026-09-16
 
 ### Fixed
