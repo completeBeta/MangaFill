@@ -2,6 +2,27 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.18] - 2026-09-17
+
+### Fixed
+- **The viewer's "Re-render page" button no longer looks pasted on.** It was a bare
+  `<button>` outside the styled `.viewer-nav`, so it fell back to the browser's LIGHT
+  default: white block, black text, square corners, on a dark bar. Every control in the
+  viewer bar now shares one base style (`background/border/radius/padding/hover/
+  focus-visible/disabled`), the re-render button is a themed accent-tinted ghost that
+  fills on hover and shows a busy look while it reads "Queued…", and the close ✕ is a
+  38px icon button tinted on hover.
+- Prev / n / Next are now one segmented control, the position is tabular-nums so it
+  stops twitching between pages, and the title truncates with an ellipsis instead of
+  pushing the controls around.
+- The viewer bar is opaque (with a drop shadow); it used to show the dashboard header
+  through the translucent overlay behind the buttons.
+
+### Changed
+- **Phones (<=760px):** the viewer bar wraps (title on its own row, controls below) and
+  the Original / Translated panes stack vertically, so a page is readable instead of
+  being squeezed into half the screen.
+
 ## [0.27.17] - 2026-09-17
 
 ### Fixed

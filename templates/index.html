@@ -202,12 +202,14 @@
     <div class="viewer-bar">
       <span id="viewer-title"></span>
       <div class="viewer-nav">
-        <button id="viewer-prev">◀ Prev</button>
+        <button id="viewer-prev" title="Previous page" aria-label="Previous page">◀ Prev</button>
         <span id="viewer-pos"></span>
-        <button id="viewer-next">Next ▶</button>
+        <button id="viewer-next" title="Next page" aria-label="Next page">Next ▶</button>
       </div>
-      <button id="viewer-rerender" title="Render just this page again with the current pipeline (use after a fix)">Re-render page</button>
-      <button id="viewer-close">✕</button>
+      <div class="viewer-actions">
+        <button id="viewer-rerender" title="Render just this page again with the current pipeline (use after a fix)">Re-render page</button>
+        <button id="viewer-close" title="Close viewer" aria-label="Close viewer">✕</button>
+      </div>
     </div>
     <div class="viewer-panes">
       <figure><figcaption>Original</figcaption><img id="viewer-orig" alt="original"></figure>
