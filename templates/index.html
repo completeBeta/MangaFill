@@ -30,6 +30,20 @@
           <button id="refresh-jobs" class="btn">Refresh</button>
         </div>
       </div>
+      <div id="cost-tally" class="tally">
+        <div class="tally-row">
+          <span class="tally-label">Total cost</span>
+          <span id="tally-cost" class="tally-cost">—</span>
+          <select id="tally-period" title="Period the total cost covers">
+            <option value="day" selected>Day</option>
+            <option value="week">Week</option>
+            <option value="month">Month</option>
+            <option value="year">Year</option>
+          </select>
+          <span id="tally-window" class="muted tally-window"></span>
+        </div>
+        <div id="tally-detail" class="tally-detail muted"></div>
+      </div>
       <div id="jobs-list" class="jobs-list">
         <p class="muted">No jobs yet — upload some pages.</p>
       </div>

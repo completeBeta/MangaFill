@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import zipfile
 from datetime import datetime, timezone
 
@@ -279,22 +280,74 @@ def _download_ext(output_mode: str, source_format: str) -> str:
     return source_format if source_format in ("cbz", "zip") else "cbz"
 
 
+def _out_pages(out_dir: str) -> list[str]:
+    """Output page filenames in reading order."""
+    return sorted(
+        [f for f in os.listdir(out_dir)
+         if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))],
+        key=_natural_key,
+    )
+
+
+def _fingerprint(out_dir: str, pages: list[str]) -> dict:
+    """Name -> [mtime_ns, size] for every output page (the archive's cache key)."""
+    fp: dict = {}
+    for name in pages:
+        try:
+            st = os.stat(os.path.join(out_dir, name))
+        except OSError:
+            continue
+        fp[name] = [int(st.st_mtime_ns), st.st_size]
+    return fp
+
+
+def _read_manifest(path: str) -> dict | None:
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _download_archive(job_id: int, ext: str) -> str:
+    """Path to the job's archive, REBUILT whenever the rendered pages changed.
+
+    v0.27.16. The archive used to be built once and reused forever
+    (`if not os.path.exists(arc)`), so any page re-rendered after the first
+    download never made it into the file the user received — the download kept
+    serving the ORIGINAL render, which is exactly what was reported. It is now a
+    cache keyed on a manifest of the output pages (name, mtime_ns, size), so a
+    re-render, a resumed page, or a deleted page invalidates it.
+    """
+    out_dir = _out_dir(job_id)
+    pages = _out_pages(out_dir) if os.path.isdir(out_dir) else []
+    if not pages:
+        raise HTTPException(404, "no output pages yet")
+    arc = os.path.join(_job_dir(job_id), f"translated.{ext}")
+    manifest = arc + ".manifest.json"
+    fp = _fingerprint(out_dir, pages)
+    if os.path.exists(arc) and _read_manifest(manifest) == fp:
+        return arc
+    tmp = f"{arc}.tmp"
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as zf:
+        for name in pages:
+            zf.write(os.path.join(out_dir, name), arcname=name)
+    os.replace(tmp, arc)  # atomic: a concurrent download never sees a partial zip
+    with open(manifest, "w") as fh:
+        json.dump(fp, fh)
+    return arc
+
+
 @router.get("/{job_id}/download")
 def download(job_id: int, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
     ext = _download_ext(job.output_mode, job.source_format)
-    arc = os.path.join(_job_dir(job_id), f"translated.{ext}")
-    if not os.path.exists(arc):
-        out_dir = _out_dir(job_id)
-        pages = sorted(
-            [f for f in os.listdir(out_dir) if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))],
-            key=_natural_key,
-        )
-        if not pages:
-            raise HTTPException(404, "no output pages yet")
-        with zipfile.ZipFile(arc, "w", zipfile.ZIP_STORED) as zf:
-            for name in pages:
-                zf.write(os.path.join(out_dir, name), arcname=name)
-    return FileResponse(arc, filename=f"{job.name}.{ext}")
+    arc = _download_archive(job_id, ext)
+    resp = FileResponse(arc, filename=f"{job.name}.{ext}")
+    # Rebuilt in place when pages change: a browser-cached copy would be the
+    # stale render the manifest exists to avoid.
+    resp.headers["Cache-Control"] = "no-store"
+    return resp

@@ -61,12 +61,35 @@ def set_setting(db, key: str, value) -> bool:
 
 # ---- models (OpenAI-compatible list + peak/off-peak pricing) ----
 
+def mask_api_key(key: str | None) -> str:
+    """Show enough of a key to recognise it, never enough to use it (v0.27.16).
+
+    `GET /api/models` used to return the raw key, which put it in the DOM of any
+    browser that opened Settings (and in any screenshot of it). The API now
+    returns this mask plus an `api_key_set` flag; the editor treats an empty or
+    masked value as "keep the stored key".
+    """
+    k = (key or "").strip()
+    if not k:
+        return ""
+    if len(k) <= 8:
+        return "•" * len(k)
+    return f"{k[:6]}…{k[-4:]}"
+
+
+def is_masked_key(value: str | None) -> bool:
+    """True if `value` is a mask (or empty) rather than a real key to store."""
+    v = (value or "").strip()
+    return (not v) or ("…" in v) or ("•" in v)
+
+
 def _model_dict(m: Model) -> dict:
     return {
         "id": m.id,
         "name": m.name,
         "base_url": m.base_url,
-        "api_key": m.api_key,
+        "api_key": mask_api_key(m.api_key),
+        "api_key_set": bool((m.api_key or "").strip()),
         "price_in": m.price_in or 0.0,
         "price_out": m.price_out or 0.0,
         "offpeak_in": m.offpeak_in,
@@ -113,9 +136,15 @@ def update_model(db, model_id: int, **fields) -> dict | None:
     m = db.get(Model, model_id)
     if m is None:
         return None
+    # The editor is shown the MASKED key, so an empty or masked value means
+    # "leave the stored key alone" — echoing the mask back must never overwrite
+    # a working key with "sk-a2a…3f9d" (v0.27.16).
+    new_key = fields.pop("api_key", None)
     for k, v in fields.items():
         if hasattr(m, k):
             setattr(m, k, v)
+    if new_key is not None and not is_masked_key(new_key):
+        m.api_key = new_key.strip()
     db.commit()
     db.refresh(m)
     return _model_dict(m)

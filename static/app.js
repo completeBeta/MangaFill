@@ -55,7 +55,7 @@ function modelFields(prefix, m) {
     <label class="field"><span>API base URL</span>
       <input type="text" id="${prefix}-base" placeholder="https://api.openai.com/v1" value="${v(m.base_url)}"></label>
     <label class="field"><span>API key</span>
-      <input type="password" id="${prefix}-key" placeholder="sk-…" autocomplete="off" value="${v(m.api_key)}"></label>
+      <input type="password" id="${prefix}-key" placeholder="${m.api_key_set ? "leave blank to keep the stored key" : "sk-…"}" autocomplete="off" value="${m.api_key_set ? "" : v(m.api_key)}"></label>
     <div class="pricing">
       <div class="pricing-title">Pricing — $/1M tokens (peak = standard rate; off-peak optional)</div>
       <div class="pricing-grid">
@@ -103,7 +103,7 @@ function renderModels(models) {
         <div class="model-info">
           <span class="model-name">${esc(m.name)}</span>
           <span class="muted model-base">${esc(m.base_url)}</span>
-          <span class="${m.api_key ? "ok" : "warn"}">${m.api_key ? "key set" : "no key"}</span>
+          <span class="${m.api_key_set ? "ok" : "warn"}" title="${m.api_key_set ? v(m.api_key) : ""}">${m.api_key_set ? "key set" : "no key"}</span>
         </div>
         <div class="model-row-actions">
           <button class="btn small model-toggle" id="toggle-${m.id}" onclick="toggleModel(${m.id})" title="Edit model">▾</button>
@@ -250,6 +250,31 @@ function renderJobs(jobs) {
 
 async function loadJobs() {
   renderJobs(await api("/api/jobs"));
+}
+
+// ---- cost tally (total cost for the selected period; defaults to Day) --------
+let tallyPeriod = "day";
+const TALLY_LABEL = { day: "today", week: "this week", month: "this month", year: "this year" };
+
+async function loadTally() {
+  let t;
+  try {
+    t = await api("/api/stats/cost?period=" + encodeURIComponent(tallyPeriod));
+  } catch (e) {
+    $("#tally-cost").textContent = "—";
+    $("#tally-detail").textContent = "cost tally unavailable";
+    return;
+  }
+  const w = t.window || {};
+  const all = t.all_time || {};
+  $("#tally-cost").textContent = "$" + (w.cost_usd || 0).toFixed(6);
+  $("#tally-window").textContent = TALLY_LABEL[t.period] || t.period;
+  $("#tally-detail").textContent =
+    `${w.jobs || 0} job${w.jobs === 1 ? "" : "s"} · ${w.pages_done || 0} pages · ` +
+    `${w.tokens || 0} tok  —  all time $${(all.cost_usd || 0).toFixed(6)} ` +
+    `(${all.tokens || 0} tok, ${all.jobs || 0} jobs)` +
+    ((w.tokens || 0) > 0 && !(w.cost_usd > 0)
+      ? "  ·  model rates are 0, so cost reads $0 — set $/1M tokens in Settings" : "");
 }
 
 async function deleteJob(id) {
@@ -545,4 +570,10 @@ loadSettings();
 loadModels();
 loadFonts();
 loadGpu();
+$("#tally-period").addEventListener("change", (e) => {
+  tallyPeriod = e.target.value;
+  loadTally();
+});
+loadTally();
 setInterval(loadJobs, 2500);
+setInterval(loadTally, 15000); // the tally moves only when a job finishes

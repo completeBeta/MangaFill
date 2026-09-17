@@ -2,6 +2,33 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.16] - 2026-09-17
+
+### Fixed
+- **Downloads now include pages re-rendered after the first download.** The archive
+  (`data/jobs/<id>/translated.<cbz|zip>`) was built once and reused forever
+  (`if not os.path.exists(arc)`), so every page re-rendered later — a pipeline fix
+  applied with Re-render, a resumed page — never reached the file the user received:
+  the download kept serving the ORIGINAL render. The archive is now a cache keyed on a
+  manifest of the output pages (`translated.<ext>.manifest.json`, name + mtime_ns +
+  size), rebuilt whenever a page changes, is added or is deleted, written to a temp
+  file and moved into place so a concurrent download never sees a partial zip, and
+  served with `Cache-Control: no-store` so the browser cannot hand back the old one.
+- **`GET /api/models` no longer returns the API key in full.** The raw key was in the
+  JSON, the DOM of the Settings tab, and every screenshot of it. It is now masked
+  (`sk-abc…6789`) with a separate `api_key_set` flag; the editor shows an empty field
+  with "leave blank to keep the stored key", and a blank or masked value submitted back
+  keeps the stored key instead of overwriting it with the mask.
+
+### Added
+- **Cost tally with a Day / Week / Month / Year selector (defaults to Day)** on the
+  Jobs tab: the total spend for the selected CALENDAR window in the app's timezone
+  (today, this week from Monday, this month, this year), plus jobs / pages / tokens for
+  the window and the all-time total next to it. New endpoint `GET /api/stats/cost`
+  (`?period=day|week|month|year&tz=Australia/Sydney`). A job's spend is attributed to
+  the window containing `finished_at`, else `updated_at`, else `created_at`. When the
+  model's rates are 0 the UI says so instead of implying the work was free.
+
 ## [0.27.15] - 2026-09-17
 
 ### Fixed

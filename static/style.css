@@ -127,6 +127,15 @@ h2 { margin-top: 0; font-size: 17px; }
 
 /* Jobs list */
 .jobs-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+
+/* Cost tally — total cost for the selected period (default: today) */
+.tally { margin-top: 14px; padding: 10px 14px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; }
+.tally-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.tally-label { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+.tally-cost { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tally-window { font-size: 13px; }
+#tally-period { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+.tally-detail { margin-top: 4px; font-size: 12px; }
 .job {
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
 }
