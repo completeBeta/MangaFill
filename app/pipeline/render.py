@@ -28,7 +28,7 @@ from PIL import Image
 from .bubble import find_container, find_speech_box, is_free_floating, region_angle
 from .detector import detect_containers, find_parent_bubble
 from .ingest import load_image
-from .inpaint import inpaint_text
+from .inpaint import inpaint_text, stroke_boxes
 from .language import has_cjk_or_hangul
 from .ocr import ocr_crop
 from .ocr_multilingual import detect_language, drop_all_pipelines, read_boxes_text, is_noise_box
@@ -636,6 +636,56 @@ def _is_drawn_sfx(block) -> bool:
     return h >= 28    # a drawn glyph block, not a small label/stamp
 
 
+_STUB_ART_MIN_AREA = 25000
+
+
+def _ascii_share(text: str) -> float:
+    """Share of the text's letters/digits that are plain ASCII (already-English)."""
+    letters = [c for c in (text or "") if c.isalnum()]
+    if not letters:
+        return 0.0
+    return sum(1 for c in letters if c.isascii()) / len(letters)
+
+
+def _drop_english_signage(blocks: list, bubbles: list) -> list:
+    """Drop ko/zh blocks whose reading is mostly already-English type.
+
+    A Korean shop sign carrying English ("OPEN EVENT / GRAND OPEN 4/25-12/25")
+    comes back from OCR as a Latin-dominant string, is translated as if it were
+    dialogue, and re-letters as nonsense over an erased sign — job-2 page 46's shop
+    front was flattened into a white wash under "DPENON.ETER 40TH WEEK GRAND OPEN
+    4/25-12/25 EYET". Leaving that block alone keeps the sign and its artwork; the
+    block has no bubble, so it is signage rather than dialogue.
+    """
+    out = []
+    for b in blocks:
+        if _ascii_share(b.text or "") >= 0.6 and not (bubbles and find_parent_bubble(bubbles, b.bbox)):
+            continue
+        out.append(b)
+    return out
+
+
+def _drop_stub_art(blocks: list, bubbles: list) -> list:
+    """Drop ko/zh blocks that are a one-glyph read of a large drawn-art region.
+
+    PaddleOCR reads PART of a drawn sound effect but returns the box of the whole
+    art: job-2 page 56's `치이즈` came back as a single character (`철`, confidence
+    0.98) in a 384x457 box. Erasing that box destroys the artwork behind it and
+    there is no real translation to letter — the block only existed because the OCR
+    mis-read a picture. Leaving it as art beats a smeared patch plus junk English.
+    Only blocks with no enclosing bubble are candidates (a real balloon can hold a
+    single big glyph, e.g. `뭐?`).
+    """
+    out = []
+    for b in blocks:
+        x, y, w, h = b.bbox
+        if (w * h >= _STUB_ART_MIN_AREA and _glyph_count(b.text or "") <= 1
+                and not (bubbles and find_parent_bubble(bubbles, b.bbox))):
+            continue
+        out.append(b)
+    return out
+
+
 def _merge_blocks_per_bubble(blocks: list, bubbles: list) -> list:
     """Merge blocks that resolve to the SAME speech bubble into one block.
 
@@ -750,6 +800,14 @@ def _stack_adjacent(a: tuple, b: tuple) -> bool:
     x_overlap = min(ax + aw, bx + bw) - max(ax, bx)
     if x_overlap <= 0.3 * min(aw, bw):
         return False  # different column — never merge across a horizontal gap
+    # Lines of ONE text block share a line height. Without this guard a drawn
+    # sound effect sitting under a narration box merges into it: job-2 page 56's
+    # `단지 맛이 끔찍하게 없었을 뿐.` (three 60-70px lines in a dark panel) swallowed
+    # the 384x457 drawn `치이즈` below it, so the erase box covered both — erasing
+    # the artwork behind them — and the translation/lettering landed between the
+    # two (the narration panel came back EMPTY, with the English over the art).
+    if max(ah, bh) > 3.0 * min(ah, bh):
+        return False  # wildly different line heights — different elements
     gap = ay - (by + bh) if ay >= by else by - (ay + ah)
     return gap <= 0.6 * min(ah, bh)  # adjacent (or overlapping) lines
 
@@ -939,6 +997,28 @@ def _extract_carryover(result_np: np.ndarray, targets: list, page_h: int) -> lis
             if patch.size and not _patch_is_blank(patch):
                 patches.append((patch, (rx, 0, rw, bottom - page_h)))
     return patches
+
+
+_MIN_STROKE_BOX_PX = 8000
+
+
+def _erase_rects(gray: np.ndarray | None, box: tuple) -> list[tuple]:
+    """Erase rects for one text box — stroke-level for big boxes, the box otherwise.
+
+    A big erase box sitting on artwork repainted the whole rectangle with a flat
+    LaMa wash (job-2 page 38's drawn `튼다다` over a fire-lit panel came back as a
+    grey block). For those, hand the inpainter the ink strokes instead — the
+    geometry and the real-worker A/B are documented in `inpaint.stroke_boxes`.
+    Small boxes keep the plain rectangle: cheap, and a box that tight around its
+    text has no artwork to protect.
+    """
+    full = tuple(int(v) for v in box)
+    if gray is None or box[2] * box[3] < _MIN_STROKE_BOX_PX:
+        return [full]
+    try:
+        return [tuple(int(v) for v in r) for r in stroke_boxes(gray, full)]
+    except Exception:
+        return [full]
 
 
 def _dedup_boxes(boxes: list[tuple], seen: list[tuple], keep: str = "largest") -> list[tuple]:
@@ -1286,10 +1366,17 @@ def render_translated_page(
         blocks = _drop_titles(blocks, page_h)
     blocks = _split_bullet_lines(blocks)
 
+    # Already-English signage and one-glyph reads of drawn art are not dialogue —
+    # see each guard for the pages that motivated it.
+    if lang in ("ko", "zh"):
+        blocks = _drop_stub_art(_drop_english_signage(blocks, bubbles), bubbles)
+
     # One bubble must hold ONE string: several OCR blocks resolving to the same
     # speech bubble would otherwise each be centred into it, lettering English
-    # over English (see `_merge_blocks_per_bubble`).
-    if lang in ("ko", "zh") and bubbles:
+    # over English (see `_merge_blocks_per_bubble`). Applies to every language:
+    # job-3 page 145's starburst balloon held `ヒッ` AND a full sentence, and both
+    # were lettered into the balloon on top of each other.
+    if bubbles:
         blocks = _merge_blocks_per_bubble(blocks, bubbles)
 
     # ---- boundary filtering (lookahead / carryover) --------------------------
@@ -1346,6 +1433,8 @@ def render_translated_page(
     # ---- resolve typeset targets + erase boxes -------------------------------
     targets: list[tuple[TextBlock, tuple]] = []
     erase: list[tuple] = []
+    # Gray copy of the (lookahead-stitched) page for the stroke-level erase masks.
+    gray_page = np.asarray(image.convert("L"))
     # Blocks whose region is a speech balloon (not a bare rectangle): the
     # typesetter fits their lettering to the balloon's actual outline.
     shaped: set[int] = set()
@@ -1360,7 +1449,7 @@ def render_translated_page(
         #   3) caption strip — free-floating text with no enclosing box at all.
         for b in blocks:
             if b.orientation == "furigana":
-                erase.append(b.bbox)
+                erase.extend(_erase_rects(gray_page, b.bbox))
                 continue
             if not b.translation:
                 continue
@@ -1402,7 +1491,7 @@ def render_translated_page(
                 else 0.0
             )
             targets.append((b, region))
-            erase.append(b.bbox)
+            erase.extend(_erase_rects(gray_page, b.bbox))
     elif bubbles is not None:
         for b in blocks:
             if not b.translation:
@@ -1426,19 +1515,19 @@ def render_translated_page(
                     # `_free_text_region` for the tall-narrow widening rule).
                     region = _free_text_region(b.bbox, page_w, page_h)
             targets.append((b, region))
-            erase.append(b.bbox)
+            erase.extend(_erase_rects(gray_page, b.bbox))
     else:
         gray = np.asarray(image.convert("L"))
         for b in blocks:
             if b.orientation == "furigana":
-                erase.append(b.bbox)
+                erase.extend(_erase_rects(gray_page, b.bbox))
                 continue
             if not b.translation:
                 continue
             if is_free_floating(gray, b.bbox):
                 continue
             targets.append((b, find_container(gray, b.bbox)))
-            erase.append(b.bbox)
+            erase.extend(_erase_rects(gray_page, b.bbox))
 
     # ---- inpaint (remote GPU worker → local LaMa) ----------------------------
     # Erase the Korean in carryover regions even if detection missed them, so a

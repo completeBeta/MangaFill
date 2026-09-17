@@ -2,6 +2,49 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.14] - 2026-09-17
+
+### Fixed
+- **Erasing a block no longer repaints the artwork behind it.** The erase mask was each
+  block's full rectangle, so a block sitting on art came back as a flat LaMa wash: job-2
+  page 38's drawn `튼다다` (502x735, over a fire-lit panel) was a grey block, page 84's
+  `조~으~옹..` flattened a blue sky, and page 56's narration panel + drawn `치이즈` were
+  merged into one 464x656 box that erased the art behind both. Measured on those pages the
+  ink is only 9-19% of the box, so the mask is now built from the strokes
+  (`inpaint.stroke_boxes`): a per-tile median background, a high-contrast ink mask, small
+  enclosed holes filled (a drawn glyph's face reads as background otherwise and survives as
+  a ghost), then cell runs with a skirt. Verified by A/B-ing the real LaMa on the GPU
+  worker: the fire-lit building, the sky and the shop interior all survive where the box
+  mask flattened them. The mask falls back to the plain rectangle whenever the ink fills
+  most of the box, so the worst case is the previous behaviour.
+- **A drawn sound effect can no longer merge into the narration above it.** Lines of one
+  text block share a line height, so `_stack_adjacent` now refuses a merge when the two
+  boxes' heights differ by more than 3x. On job-2 page 56 the three-line narration
+  (60-70px lines) had swallowed the 384x457 drawn `치이즈` below it: the erase box covered
+  both, the translation landed between them, and the narration panel came back EMPTY with
+  the English drawn over the erased art. The panel is now lettered inside itself.
+- **A drawn-picture mis-read is left as art.** A block whose box is ≥25000px² and whose
+  reading is a single glyph, with no enclosing balloon, is a partial read of a drawing
+  (`치이즈` came back as `철`, confidence 0.98, in a 384x457 box). Erasing it destroyed the
+  art and there was no real translation to letter, so it is left alone.
+- **Already-English signage is left alone.** A Korean/Chinese sign carrying English type
+  reads back as a Latin-dominant string and was translated as dialogue: job-2 page 46's
+  shop front was washed out under "DPENON.ETER 40TH WEEK GRAND OPEN 4/25-12/25 EYET".
+  Blocks with no enclosing balloon whose letters are ≥60% ASCII are now skipped, so the
+  sign and its artwork stay intact.
+- **One balloon holds ONE string in Japanese too.** `_merge_blocks_per_bubble` ran only for
+  Korean/Chinese, so a starburst balloon holding two blocks was lettered twice, on top of
+  itself — job-3 page 145 carried "HII!" straight through "A TANNED BEARDED OLD MAN WITH A
+  WHITE CLOTH...". Merging now covers every language, so the balloon goes to the translator
+  as one unit and is lettered once.
+
+### Tests
+- 21 new unit tests: `test_erase_and_guards.py` (stroke masks, hole filling, the merge
+  height guard, the signage and stub-art guards) and `test_render_erase_wiring.py`, which
+  drives `render_translated_page` with the models stubbed out — the wiring test exists
+  because a `Image has no attribute 'ndim'` typo in the erase path passed every
+  pure-function test and only surfaced when a real page was rendered in the browser.
+
 ## [0.27.13] - 2026-09-16
 
 ### Fixed
