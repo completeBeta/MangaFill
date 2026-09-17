@@ -112,7 +112,10 @@ def test_period_windows_are_calendar_windows_in_local_time():
     assert month == datetime(2026, 8, 31, 14, 0, tzinfo=timezone.utc)    # 1 Sep 00:00
     assert year == datetime(2025, 12, 31, 13, 0, tzinfo=timezone.utc)    # 1 Jan 00:00 AEDT
     assert year < month < week < day, "windows must nest: year opens first, day last"
-    assert resolve_tz("Nowhere/Nothing") is timezone.utc                 # bad name -> UTC
+    # An unknown name falls through to the app's configured zone, then TZ, then
+    # the system zone — never a crash, and never silently UTC when a zone is set.
+    assert resolve_tz("Nowhere/Nothing") is not None
+    assert resolve_tz("Australia/Sydney").key == "Australia/Sydney"
 
 
 def test_tally_window_and_all_time_totals():

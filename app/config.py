@@ -40,5 +40,11 @@ class Settings(BaseSettings):
     # Output
     output_mode: str = "folder"   # folder | cbz | mirror
 
+    # Local timezone (IANA name) used for calendar windows — the cost tally's
+    # Day/Week/Month/Year and anything that reports "today". Override with
+    # MANGA_FILL_TIMEZONE, or with TZ (checked next); unknown names fall back to
+    # the container's own zone and finally to UTC.
+    timezone: str = "Australia/Sydney"
+
 
 settings = Settings()

@@ -2,6 +2,16 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.17] - 2026-09-17
+
+### Fixed
+- **The cost tally counts "today" in the local timezone, not the container's clock.**
+  The window boundaries defaulted to UTC because the app had no timezone configured
+  (the container runs with no `TZ`), so a Sydney user's "Day" total could be a day out.
+  `app.config.settings.timezone` now defaults to `Australia/Sydney` (override with
+  `MANGA_FILL_TIMEZONE`, or `TZ`), and `resolve_tz` falls back through explicit query
+  param -> app timezone -> `TZ` -> the system zone -> UTC.
+
 ## [0.27.16] - 2026-09-17
 
 ### Fixed

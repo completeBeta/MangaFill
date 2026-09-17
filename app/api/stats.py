@@ -14,6 +14,7 @@ Also exposes the all-time total so the UI can show "today / all time" together.
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
@@ -34,13 +35,30 @@ except Exception:  # pragma: no cover - defensive
 
 
 def resolve_tz(name: str | None):
-    """The zone for the calendar windows, falling back to UTC when unknown."""
-    if name and ZoneInfo is not None:
-        try:
-            return ZoneInfo(name)
-        except Exception:
-            pass
-    return timezone.utc
+    """The zone for the calendar windows.
+
+    Order: the explicit `name` (query parameter), the app's configured timezone,
+    the container's TZ, the system's own zone, then UTC. Without the app-level
+    timezone the tally would silently count "today" in the container's clock
+    (UTC here), which is a day out for anyone in Australia.
+    """
+    candidates = [name]
+    try:
+        from app.config import settings as app_settings
+        candidates.append(getattr(app_settings, "timezone", None))
+    except Exception:
+        pass
+    candidates.append(os.environ.get("TZ"))
+    if ZoneInfo is not None:
+        for cand in candidates:
+            if not cand:
+                continue
+            try:
+                return ZoneInfo(cand)
+            except Exception:
+                continue
+    local = datetime.now().astimezone().tzinfo
+    return local or timezone.utc
 
 
 def parse_dt(value) -> datetime | None:
