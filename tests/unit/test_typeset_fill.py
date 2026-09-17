@@ -50,16 +50,49 @@ def test_balloon_is_filled_to_its_curve():
     assert size >= 12
 
 
-def test_rect_path_keeps_aesthetic_sizing():
-    """A boundary-less region must not blow a caption up past its own scale."""
+def _old_fit(text: str, max_w: int, max_h: int, cap: int):
+    """The v0.27.14 rule: largest size that fits with at most one lone-word line."""
+    from app.pipeline.typeset import _wrap
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    best = clean = None
+    for size in range(cap, 7, -1):
+        font = ImageFont.truetype(_fp(), size)
+        sw = max(1, size // 8)
+        lines = _wrap(probe, text, font, max_w)
+        bb = probe.multiline_textbbox((0, 0), "\n".join(lines), font=font, spacing=2,
+                                     align="center", stroke_width=sw)
+        if bb[2] - bb[0] > max_w or bb[3] - bb[1] > max_h:
+            continue
+        if best is None:
+            best = (size, lines, font)
+        if sum(1 for ln in lines if len(ln.split()) == 1) <= 1:
+            clean = (size, lines, font)
+            break
+    return clean or best
+
+
+def test_rect_path_fills_its_strip():
+    """A boundary-less region must FILL its strip (v0.27.15) without spilling out.
+
+    v0.27.8 kept the aesthetic "no lone-word line" sizing here, which is what left
+    boxes 70-90% empty; the fill rule now sizes to the strip and only rejects the
+    word-list look. The strip is derived from the source text's own box, so filling
+    it cannot collide with a neighbouring panel the way v0.27.7's page-wide cap did.
+    """
     fp = _fp()
     if not fp:
         return
-    # narrow strip, text that could be lettered as one word per line at a big size
-    size, lines, _f = _fit("Somewhere brilliant in the middle, though", 150, 240, fp,
-                           max_font=35)
-    assert size < 35, f"caption blew up to {size}px in a boundary-less strip"
-    assert sum(1 for ln in lines if len(ln.split()) == 1) <= 1
+    text = "Somewhere brilliant in the middle, though"
+    old = _old_fit(text, 150, 240, 35)
+    size, lines, _f = _fit(text, 150, 240, fp, max_font=35)
+    assert old is not None and size > old[0], f"no gain on the old rule ({old[0]}px -> {size}px)"
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    bb = probe.multiline_textbbox((0, 0), "\n".join(lines), font=_f, spacing=2,
+                                 align="center", stroke_width=max(1, size // 8))
+    assert bb[2] - bb[0] <= 150 and bb[3] - bb[1] <= 240
+    if len(lines) >= 3:
+        lone = sum(1 for ln in lines if len(ln.split()) == 1)
+        assert lone < len(lines) - 1, f"lettered as a word list: {lines}"
 
 
 def test_roomy_box_behaviour_is_unchanged():

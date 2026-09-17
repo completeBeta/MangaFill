@@ -576,8 +576,16 @@ def _ocr_ko_zh_native(page_image, page_np, lookahead, worker_url, lang: str,
         (_back(x, y, w, h), text, conf, angle)
         for (x, y, w, h), text, conf, angle in call(joined_img, lang)
     ]
-    kept = [b for b in boxes if b[0][1] < off]
-    kept = _band_handover(kept, band_boxes, page_h)
+    # v0.27.15: the page's own NATIVE read is authoritative for text that sits
+    # fully inside the page. Pre-dropping every page box that started inside the
+    # band let a worse band reading win: job-2 page 29's page pass read
+    # '발단은'/'5년전' at conf 1.000 at native scale, the rescaled band read '긍'
+    # (0.952) over the same pixels, the band version replaced them, and the
+    # pipeline then erased one line's box and lettered "Mm." over the Korean that
+    # survived. `_band_handover` already reconciles the passes correctly — a band
+    # box that CROSSES the cut supersedes this page's partial view, and a band box
+    # that duplicates a page box is dropped in favour of the native read.
+    kept = _band_handover(boxes, band_boxes, page_h)
     if len(kept) != len(boxes) or band_boxes:
         print(f"[ocr] native={len(boxes)} -> {len(kept)} after band handover, "
               f"band={len(band_boxes)} (offset {off})")

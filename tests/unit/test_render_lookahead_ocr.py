@@ -157,6 +157,46 @@ def test_handover_without_a_band_is_a_noop():
     assert render._band_handover(page, [], 400) == page
 
 
+def test_page_read_wins_over_a_worse_band_read_inside_the_page(monkeypatch):
+    """job-2 page 29 (real numbers): the band must not replace a better native read.
+
+    Page pass at native scale read TWO lines — '발단은' (221,1365,250,110) and
+    '5년전' (218,1473,252,116), both conf 1.000. The boundary band (rescaled to the
+    page's long side) read the same pixels as a single junk glyph '긍' (conf 0.952)
+    in (213,1358,263,121). Pre-v0.27.15 the page's boxes were dropped whenever they
+    started inside the band (`[b for b in boxes if b[0][1] < off]`), so the junk
+    reading became the only block: the pipeline erased one line's box, translated
+    '긍' as "Mm." and lettered it over the Korean that survived.
+    """
+    page_boxes = [((221, 1365, 250, 110), "발단은", 1.0, 0.0),
+                  ((218, 1473, 252, 116), "5년전", 1.0, 0.0)]
+    # band-image coords that map back to (213,1358,263,121) at band=500, page 690x1600
+    band_boxes = [((341, 413, 421, 194), "긍", 0.952, 0.0)]
+    calls = []
+    monkeypatch.setattr(render, "remote_ocr_multilingual",
+                        _seq_ocr(page_boxes, band_boxes, calls))
+    page = Image.new("RGB", (690, 1600), "white")
+    lookahead = np.zeros((500, 690, 3), dtype=np.uint8)
+    out = render._ocr_ko_zh_native(page, np.asarray(page), lookahead, "http://w", "ko",
+                                   band=500)
+    texts = sorted(t for _b, t, _c, _a in out)
+    assert texts == ["5년전", "발단은"], f"native page read was overridden: {texts}"
+
+
+def test_band_only_reading_inside_the_page_is_still_kept(monkeypatch):
+    """If the page pass missed the text, the band's box still reaches the pipeline."""
+    page_boxes = [((221, 1365, 250, 110), "발단은", 1.0, 0.0)]
+    band_boxes = [((560, 200, 200, 120), "MISSED", 0.9, 0.0)]   # elsewhere in the band
+    calls = []
+    monkeypatch.setattr(render, "remote_ocr_multilingual",
+                        _seq_ocr(page_boxes, band_boxes, calls))
+    page = Image.new("RGB", (690, 1600), "white")
+    lookahead = np.zeros((500, 690, 3), dtype=np.uint8)
+    out = render._ocr_ko_zh_native(page, np.asarray(page), lookahead, "http://w", "ko",
+                                   band=500)
+    assert sorted(t for _b, t, _c, _a in out) == ["MISSED", "발단은"]
+
+
 # ------------------------------------------------------------- per-bubble merge
 
 def test_blocks_in_one_bubble_are_merged():

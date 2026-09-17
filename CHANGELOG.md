@@ -2,6 +2,40 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.15] - 2026-09-17
+
+### Fixed
+- **Lettering now sizes itself to the box it is given, for all three languages.** The
+  fitter used to take "the largest size that fits *and* carries at most one one-word
+  line", so whenever a tidy wrapping existed anywhere below the cap it took that and
+  left the balloon mostly empty — audited on job 1 (Chinese manhua, real blocks): an
+  `Ah` in a 133x138 bubble lettered at 36px (13% of the box), `I'm sorry, big sister-`
+  in a 269x475 balloon at 25px (9%), a vertical `Great fortune` in a 196x313 box at
+  14px (3%), `I won't go back with you!` in a 244x403 balloon at 27px (17%). Every
+  fitting size is now scored by the area its wrapped block covers and the largest fill
+  wins, excluding only the "word list" look (three or more lines, nearly every one a
+  single word — `I'm / sorry, / big / sister-`); one-word lines inside a 1-2 line block
+  are ordinary comic lettering and stay. Same texts now: `Great fortune` 19px -> 35px
+  (one line -> two, filling the tall box), `I've finally received my first mission in
+  life.` 27px -> 35px, a boundary-less caption strip 17px -> 22px.
+- **The balloon-outline fit can no longer letter SMALLER than the balloon's inscribed
+  rectangle.** `_region_avail` flood-fills the balloon interior, and lettering or art
+  inside the balloon splits the light region into slivers, so `avail` reads 0 on most
+  rows and every size above the sliver is rejected. A 15%-inset inscribed-rectangle
+  fit is now a floor for that path, so this change can only ever grow lettering.
+- **The erasing inset came in from 15% to 10%** of the region's smaller side, so
+  lettering uses the space it was fitted to.
+- **The boundary-band OCR pass no longer overrides a better native read.** Page 29 of
+  job 2 (Korean webtoon) reads `발단은` (221,1365,250,110) and `5년전` (218,1473,252,116)
+  at conf 1.000 in the page pass; the lookahead band — the page's last 500 rows joined
+  to the next page's first 500, rescaled — read the same pixels as the single junk glyph
+  `긍` at conf 0.952. Every page box starting inside the band was dropped in favour of
+  the band's reading, so that junk block became the page's only text: the pipeline erased
+  one line's box, translated `긍` as "Mm." and lettered it over the Korean that survived.
+  The page's own native read is now authoritative for text that sits inside the page;
+  `_band_handover` still lets a band box that CROSSES the page cut supersede the page's
+  partial view of that boundary bubble, and still drops band duplicates of page boxes.
+
 ## [0.27.14] - 2026-09-17
 
 ### Fixed

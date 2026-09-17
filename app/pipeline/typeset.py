@@ -88,20 +88,36 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int) -> list[str]:
 
 
 def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):
-    """Best font size for `text` in the box: the largest size whose wrapped lines
-    fit *and* carry no single-word line, else the largest that fits.
+    """Best font size for `text` in the rectangle (max_w x max_h) — see `_fit_common`."""
+    return _fit_common(text, max_w, max_h, font_path, max_font)
 
-    The old binary search maximised size alone, so in a narrow bubble it picked a
-    size where each word lands on its own line ("I / WAITED / IN LINE / …").
-    A single-word line is the visual marker that the font is too big for the
-    width, so we prefer the largest size with none of them (failing open to the
-    largest fitting size when a lone word can't pair at any size — e.g. one very
-    long word, or a genuinely narrow box). Linear scan over the small 8..max_font
-    range is cheaper than the old binary search's correctness anyway.
+
+def _fit_common(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32,
+                avail=None, region_h: int | None = None):
+    """Largest font size whose wrapped text FITS the region — fill first.
+
+    v0.27.15. The old rule was "largest size that fits *and* carries no lone-word
+    line", which picked a far-too-small size whenever a clean-looking wrapping
+    existed anywhere below the cap: audited on job 1, an "Ah" in a 133x138 bubble
+    lettered at 36 (13% fill), "I'm sorry, big sister-" in a 269x475 balloon at 25
+    (9%), and a vertical "Great fortune" in a 196x313 box at 14 (3%). The
+    lettering is judged on how it sits in the box, so:
+
+      1. every size from `max_font` down to 8 that fits is scored by the area its
+         wrapped block covers (fill) and by how many one-word lines it has;
+      2. the largest fill wins;
+      3. among the sizes within 85% of that fill, the one with the FEWEST one-word
+         lines wins (ties -> larger size).
+
+    So a text that can fill the box does, and the "I / WAITED / IN LINE" look is
+    only kept away when a slightly smaller size removes it at little cost in fill.
+    `avail`/`region_h` (from `_region_avail`) additionally require every line to
+    stay inside a balloon's actual outline, row by row.
     """
+    if max_w < 8 or max_h < 8:
+        return None
     probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    best: tuple | None = None        # (size, lines, font) — largest fitting size
-    best_clean: tuple | None = None  # largest fitting size with no single-word line
+    cands: list[tuple[float, int, int, tuple]] = []  # (fill, lone, size, (lines, font))
     for size in range(max_font, 7, -1):
         font = ImageFont.truetype(font_path, size)
         sw = max(1, size // 8)
@@ -113,20 +129,27 @@ def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):
         tw, th = bb[2] - bb[0], bb[3] - bb[1]
         if tw > max_w or th > max_h:
             continue
-        if best is None:
-            best = (size, lines, font)
-        singles = sum(1 for ln in lines if len(ln.split()) == 1)
-        if singles <= 1:
-            best_clean = (size, lines, font)
-            break  # largest size with at most one lone-word line (scanning high -> low)
-    # NOTE (v0.27.8): the "prefer filling" rule added in v0.27.7 was removed from
-    # this rectangular path. It blew up text in regions that have NO boundary to
-    # respect — caption strips over artwork, free-floating mutter text — where a
-    # wide strip let a 1-line caption balloon to the page font cap and collide
-    # with neighbouring panels (job-4 page 10). Filling is now done properly by
-    # `_fit_shape`, which fits to the balloon's actual outline; a region with no
-    # shape keeps the aesthetic "no lone-word line" sizing it had in v0.27.6.
-    return best_clean or best
+        if avail is not None and not _lines_fit_shape(
+            probe, lines, font, avail, region_h or max_h, th
+        ):
+            continue
+        fill = (tw * th) / float(max(1, max_w * max_h))
+        lone = sum(1 for ln in lines if len(ln.split()) == 1)
+        n = len(lines)
+        # A "word list" (three or more lines, nearly every one a single word —
+        # "I'm / sorry, / big / sister-") is the one lettering look that reads as
+        # broken, so those candidates are excluded. One-word lines in a 1-2 line
+        # block are ordinary comic lettering ("Great / fortune") and are allowed.
+        if n >= 3 and lone >= n - 1:
+            continue
+        cands.append((fill, lone, size, (lines, font)))
+    if not cands:
+        return None
+    top = max(c[0] for c in cands)
+    keep = [c for c in cands if c[0] >= 0.98 * top] or cands
+    keep.sort(key=lambda c: (c[1], -c[2]))
+    fill, lone, size, (lines, font) = keep[0]
+    return (size, lines, font)
 
 
 def _region_avail(gray: "np.ndarray", region: tuple, margin_frac: float = 0.04,
@@ -218,26 +241,14 @@ def _fit_shape(text: str, avail, region_h: int, font_path: str, max_font: int = 
     This is what lets lettering FILL a balloon without escaping it: the target is
     the shape, not the bounding box, so a big round balloon can be lettered much
     larger than a rectangular inset would allow, while a spiky or oval one is
-    still never overrun.
+    still never overrun. Scoring (fill, then fewest one-word lines) comes from
+    `_fit_common` so the shape path fills as aggressively as the rectangular one.
     """
     max_w = int(avail.max())
     if max_w < 12 or region_h < 8:
         return None
-    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    for size in range(max_font, 7, -1):
-        font = ImageFont.truetype(font_path, size)
-        sw = max(1, size // 8)
-        lines = _wrap(probe, text, font, max_w)
-        joined = "\n".join(lines)
-        bb = probe.multiline_textbbox(
-            (0, 0), joined, font=font, spacing=2, align="center", stroke_width=sw
-        )
-        tw, th = bb[2] - bb[0], bb[3] - bb[1]
-        if tw > max_w or th > region_h:
-            continue
-        if _lines_fit_shape(probe, lines, font, avail, region_h, th):
-            return (size, lines, font)
-    return None
+    return _fit_common(text, max_w, region_h, font_path, max_font,
+                       avail=avail, region_h=region_h)
 
 
 def _draw_box(
@@ -262,7 +273,7 @@ def _draw_box(
     # that scales with the bubble's smaller dimension tracks the corner radius,
     # with a 6px floor so tiny bubbles keep the old breathing room. The block is
     # still centered via anchor="mm" below, so it stays centred inside the curve.
-    inset = max(int(min(w, h) * 0.15), 6)
+    inset = max(int(min(w, h) * 0.10), 6)
     iw = max(w - 2 * inset, 1)
     ih = max(h - 2 * inset, 1)
 
@@ -285,8 +296,9 @@ def _draw_box(
         max_w, max_h = iw, ih
 
     # Dynamic per-box sizing: the largest size (capped at `max_font`) that fits
-    # the box. Short text fills a big bubble; long text shrinks to fit a small
-    # one. If nothing fits, fall back to 8px (may overflow) rather than blank.
+    # the box, measured by how much of the box the lettering covers (`_fit_common`).
+    # Short text fills a big bubble; long text shrinks to fit a small one. If
+    # nothing fits, fall back to 8px (may overflow) rather than blank.
     #
     # When the caller knows the box's actual shape (`avail`, from `_region_avail`)
     # the fit targets that shape instead of the rectangle: lettering fills an oval
@@ -295,6 +307,19 @@ def _draw_box(
     fitted = None
     if avail is not None and abs(angle) < 3.0:
         fitted = _fit_shape(text, avail, h, font_path, max_font=max_font)
+        # v0.27.15 safety net: the outline fit can come out SMALLER than the
+        # balloon's inscribed rectangle when the outline detection is fragmented —
+        # `_region_avail` flood-fills the balloon interior, and lettering or art
+        # inside the balloon breaks the light region into slivers, so `avail` reads
+        # 0 on many rows and every size above the fragment size is rejected (job-1
+        # page 7's 269x475 balloon lettered at 25px, 9% fill). Never letter smaller
+        # than the inscribed rectangle (a 15% inset, the pre-v0.27.8 behaviour)
+        # allows, so this can only ever grow the lettering, never shrink it.
+        safe = max(int(min(w, h) * 0.15), 6)
+        rect = _fit(text, max(w - 2 * safe, 1), max(h - 2 * safe, 1), font_path,
+                    max_font=max_font)
+        if rect is not None and (fitted is None or rect[0] > fitted[0]):
+            fitted = rect
     if fitted is None:
         fitted = _fit(text, max_w, max_h, font_path, max_font=max_font)
     if fitted is None:
