@@ -2,6 +2,13 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.19] - 2026-09-17
+
+### Fixed
+- The re-render button's busy state now LOOKS inert: while it reads "Queued…" (disabled
+  for minutes on a slow page) it takes explicit muted colours, not just a 0.6 opacity —
+  the opacity route is easy to lose against the accent styling.
+
 ## [0.27.18] - 2026-09-17
 
 ### Fixed
