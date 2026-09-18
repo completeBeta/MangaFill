@@ -15,11 +15,13 @@ All notable changes to Manga Fill are documented here (Keep a Changelog format).
   interior art blobs (a chibi's strokes have white between them; the balloon outline
   is where the white stops for good), so the lettering is centred in the whole balloon.
   It only fires as a last resort — when the detector finds no bubble AND
-  `find_container` fails — and it rejects a span that runs to the page edge or swallows
-  neighbouring balloons (those stay with the partition logic). Measured over 67
-  vertical blocks on job-3 pages 11-15: it fires exactly twice, both the tall
-  interior-art balloons on p15; the working stacked-balloon pages (p12) are untouched.
-  3 new unit tests; 265 pass.
+  `find_container` fails — and it rejects a span that runs to the page edge, one that
+  reaches down into the interior art (the bottom is clamped to the last mostly-white
+  row, so the English never lands on the chibi), and one far taller than the text
+  column (a chain of balloons / the page background, not one balloon). Measured over
+  67 vertical blocks on job-3 pages 11-15: it fires exactly once, on the tall
+  interior-art balloon on p15; the smaller boxes near the chibi and the working
+  stacked-balloon pages (p12) are untouched. 3 new unit tests; 265 pass.
 
 ## [0.27.22] - 2026-09-18
 

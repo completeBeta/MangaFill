@@ -337,9 +337,24 @@ def find_balloon_gap_tolerant(
         return None
     # And it must not swallow neighbouring balloons: cap the total span at a few
     # times the text column's height so a merged figure-eight or a page of
-    # connected balloons is left to the partition logic instead.
-    if span_h > 2.5 * h:
+    # connected balloons is left to the partition logic instead. A genuine tall
+    # balloon's text column is most of the balloon, so a span far taller than the
+    # column is a chain of balloons / the page background, not one balloon.
+    if span_h > 1.8 * h:
         return None
+    # The gap tolerance bridges interior art (a chibi's strokes have white between
+    # them), so a naive span can reach DOWN INTO the art and letter the English
+    # onto it (job-3 p15's "EVERYDAY CONVERSATION" landing on the chibi). Clamp the
+    # bottom to the last row that is mostly WHITE across the block's width — the
+    # usable space ends where the sustained art mass begins.
+    yy = bot
+    while yy > y + h:
+        row = gray[yy, x:x + w]
+        if len(row) and float((row >= thresh).mean()) >= 0.5:
+            break
+        yy -= 1
+    bot = max(y + h, yy)
+    span_h = bot - top
 
     # Width: the widest white run within the vertical span, measured at the
     # block's own rows (the balloon is at least as wide as the text column).

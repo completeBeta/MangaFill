@@ -103,11 +103,11 @@ def test_find_balloon_gap_tolerant_recovers_tall_balloon_with_interior_art():
     # chibi strokes: several thin dark bands with white between them
     for yy in range(300, 480, 18):
         g[yy:yy + 10, 120:280] = 30
-    block = (150, 60, 100, 200)  # text column at the top of the balloon
+    block = (150, 60, 100, 260)  # text column filling most of the balloon's height
     res = find_balloon_gap_tolerant(g, block)
     assert res is not None
-    # recovers a span much taller than the block (bridges the chibi strokes)
-    assert res[3] > 1.3 * block[3]
+    # recovers a span taller than the block (bridges the chibi strokes)
+    assert res[3] > block[3]
     # encloses the block vertically
     assert res[1] <= block[1] and res[1] + res[3] >= block[1] + block[3]
 
