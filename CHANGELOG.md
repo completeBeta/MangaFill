@@ -2,6 +2,21 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.21] - 2026-09-18
+
+### Fixed
+- **Lettering a long line no longer stalls the render.** `typeset._wrap`'s
+  minimum-raggedness DP measured every candidate line by BUILDING AND MEASURING the
+  joined string — ~1ms each, O(n²) of them, re-run for every font size `_fit_common`
+  tries. A 47-word caption cost **31s per fit** (job-3 page 5 spent 103s of its render
+  in two such fits, which is why a dense page took minutes). Line widths now come from
+  each word's own extent, the inter-word space and a per-word-boundary kerning delta,
+  each measured ONCE: **page 5's fits 102.9s → 2.8s (37x)**.
+  Verified **byte-identical wrapping** over 4,425 (text, width, size) cases drawn from
+  all three jobs — 0 differences — so no existing page's lettering changes; this is a
+  pure speedup. The per-boundary kerning term is what makes it exact: summing word
+  widths alone shifted ~1.6% of wraps by a pixel-level DP tie.
+
 ## [0.27.20] - 2026-09-18
 
 ### Fixed

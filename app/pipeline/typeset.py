@@ -35,6 +35,12 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int) -> list[str]:
     out close to `max_w` and roughly even) with a small penalty on a lone
     trailing word so it pairs up with the line above when it fits. O(n²) in the
     word count — trivial for a speech bubble.
+
+    Line widths come from each WORD's own extent plus the inter-word space: a
+    joined string costs ~1ms to measure, and this loop measures every candidate
+    line for every font size `_fit_common` tries, so a 47-word caption spent 31s
+    per fit building and measuring joined strings (job-3 page 5). The sum is
+    additive, so the DP gets the same numbers for O(1) arithmetic per candidate.
     """
     words = text.split()
     if not words:
@@ -43,23 +49,33 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int) -> list[str]:
     if n == 1:
         return words
 
-    # Exact width of every candidate line words[i:j] (stroke included, via the
-    # same _text_w the greedy path used, so monkeypatched tests stay valid).
-    wd = [[0] * (n + 1) for _ in range(n)]
-    for i in range(n):
-        for j in range(i + 1, n + 1):
-            wd[i][j] = _text_w(draw, " ".join(words[i:j]), font)
+    # Width of every candidate line words[i:j] in O(1): a word's own extent plus
+    # the inter-word space is additive (the font also kerns across a space, by up
+    # to a pixel — measured once per word boundary so the DP sees the SAME numbers
+    # as measuring the joined string, which is what makes this a pure speedup).
+    ww = [_text_w(draw, w, font) for w in words]
+    _one = _text_w(draw, "a", font)
+    space = max(0, _text_w(draw, "a a", font) - 2 * _one)
+    kern = [
+        _text_w(draw, f"{words[k]} {words[k + 1]}", font) - (ww[k] + space + ww[k + 1])
+        for k in range(n - 1)
+    ]
 
     inf = float("inf")
     cost = [inf] * (n + 1)
     brk = [0] * (n + 1)
     cost[n] = 0.0
     for i in range(n - 1, -1, -1):
+        width = ww[i]
+        boundary = 0
         for j in range(i + 1, n + 1):
+            if j > i + 1:
+                width += space + ww[j - 1]
+                boundary += kern[j - 2]
             single = (j - i == 1)
-            if wd[i][j] > max_w and not single:
+            if width + boundary > max_w and not single:
                 break  # multi-word line too wide; a wider j only grows
-            if wd[i][j] > max_w:
+            if width + boundary > max_w:
                 # A lone word wider than the box is forced onto its own line —
                 # heavy penalty so the DP avoids it, but it keeps every position
                 # breakable (never an infinite reconstruction loop).
@@ -69,7 +85,7 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int) -> list[str]:
                 # above when it fits (0.6 > the max per-line slack² of 1.0).
                 bad = 0.6 if single else 0.0
             else:
-                slack = (max_w - wd[i][j]) / max_w
+                slack = (max_w - (width + boundary)) / max_w
                 bad = slack * slack
             c = cost[j] + bad
             if c < cost[i]:
