@@ -293,13 +293,30 @@ def _drop_titles(blocks: list[TextBlock], page_h: int) -> list[TextBlock]:
     are proper nouns / logos — leave them as-is. A block that is BOTH taller than
     ~15% of the page AND wider than it is tall is a large-font horizontal
     title/header; a tall-narrow bio paragraph or vertical name banner is kept.
+
+    Vertical title art is the same problem on its side: a big brush-drawn
+    vertical title (job-3 p187's 月夜に提灯, 379x437) is read as vertical
+    dialogue, OCR'd WRONG (提灯 -> 提出, "lantern" -> "submitted"), erased and
+    lettered with the mistranslation. A real vertical dialogue column packs many
+    glyphs into its area; a brush title has a few large strokes. Measured over
+    every job-3 vertical block >= 40000px2: the title is the ONLY one under
+    0.8 glyphs per 10k px2 (0.3); the next-lowest real dialogue is 1.08. So a
+    large vertical block with very few glyphs for its size is title art — leave
+    it as-is rather than erase + mistranslate it.
     """
     if page_h <= 0:
         return blocks
-    return [
-        b for b in blocks
-        if not (b.bbox[3] > 0.15 * page_h and b.bbox[2] > b.bbox[3])
-    ]
+    out: list[TextBlock] = []
+    for b in blocks:
+        x, y, w, h = b.bbox
+        if h > 0.15 * page_h and w > h:
+            continue  # large horizontal title/header
+        area = w * h
+        if (b.orientation == "vertical" and area >= 100000
+                and len((b.text or "").strip()) / area * 10000 < 0.8):
+            continue  # large vertical brush title — few glyphs for its size
+        out.append(b)
+    return out
 
 
 def _bubble_without_text(box: tuple, blocks: list[TextBlock]) -> bool:
@@ -336,6 +353,69 @@ def _bubble_covered(box: tuple, blocks: list[TextBlock]) -> bool:
         if union and inter / union >= 0.15:  # or substantial mutual overlap
             return True
     return False
+
+
+def _partition_shared_bubble(targets: list) -> None:
+    """Reconcile overlapping balloon regions so two blocks' text can't collide.
+
+    Two stacked speech balloons that touch (or one figure-eight the detector
+    returns as two overlapping boxes) give each block a region whose bbox
+    OVERLAPS the neighbour's. The typesetter centres each block into its own
+    region, and the two English texts print through each other in the overlap
+    (job-3 p45 "ATTEMPT" through "IN MIND-", p72 "PRACTICAL" through
+    "ADVERTISE", p12 "AT BOTH" through "INCHES"). The blocks are vertically
+    stacked, so split the overlapping pair at the vertical midpoint of their
+    overlap: the upper block's region stops there, the lower block's starts
+    there. Each keeps its full width and its own centre; only the shared edge
+    moves. Regions that don't overlap another are untouched.
+
+    `targets` is the list of (block, region) pairs built by the caller; regions
+    are updated in place.
+    """
+    def _ov(a, b):
+        ox = max(0, min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0]))
+        oy = max(0, min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1]))
+        return ox * oy
+
+    n = len(targets)
+    for i in range(n):
+        bi, ri = targets[i]
+        if ri is None:
+            continue
+        ri = tuple(int(v) for v in ri)
+        for j in range(i + 1, n):
+            bj, rj = targets[j]
+            if rj is None:
+                continue
+            rj = tuple(int(v) for v in rj)
+            if _ov(ri, rj) <= 0:
+                continue
+            # vertical overlap of the two REGIONS: split it between them.
+            top, bot = (ri, rj) if ri[1] <= rj[1] else (rj, ri)
+            top_i = i if ri[1] <= rj[1] else j
+            oy_top = max(top[1], bot[1])           # where the lower region starts
+            oy_bot = min(top[1] + top[3], bot[1] + bot[3])  # where the upper ends
+            if oy_bot <= oy_top:
+                continue
+            vov = oy_bot - oy_top
+            smaller_h = min(top[3], bot[3])
+            # Only the genuine stacked/touching case: the regions share a large
+            # vertical band (one balloon's bottom deep inside the other's top).
+            # Balloons that merely nestle (a few px of rounded corner) are left
+            # alone — their centred text does not reach the overlap.
+            if smaller_h <= 0 or vov < 0.4 * smaller_h:
+                continue
+            mid = (oy_top + oy_bot) // 2
+            # upper region: keep its top, stop at mid. lower: start at mid.
+            new_top = (top[0], top[1], top[2], max(1, mid - top[1]))
+            new_bot = (bot[0], mid, bot[2], max(1, bot[1] + bot[3] - mid))
+            if top_i == i:
+                targets[i] = (bi, new_top)
+                targets[j] = (bj, new_bot)
+            else:
+                targets[i] = (bi, new_bot)
+                targets[j] = (bj, new_top)
+            ri, rj = (new_top, new_bot) if top_i == i else (new_bot, new_top)
 
 
 # A balloon holding a lone glyph (「真」 with its furigana まこと riding beside it) is
@@ -1712,6 +1792,10 @@ def render_translated_page(
         inpainted = image
 
     only = {id(b) for b, _region in targets}
+    # Two stacked balloons detected as ONE merged balloon map two dialogue blocks
+    # to the same region; centring each into the whole balloon interleaves their
+    # English. Partition the shared balloon's height among them first.
+    _partition_shared_bubble(targets)
     regions = {id(b): region for b, region in targets if region is not None}
     emit("typeset")
     result = typeset_page(inpainted, blocks, font_id=font_id, regions=regions, only=only,

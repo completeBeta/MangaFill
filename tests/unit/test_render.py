@@ -243,12 +243,77 @@ def test_drop_titles_skips_large_text():
     title = TextBlock(bbox=(0, 0, 800, 360), text="月が導く異世界道中", orientation="vertical")
     header = TextBlock(bbox=(0, 500, 500, 300), text="学園生徒の能力チェック", orientation="vertical")
     bio = TextBlock(bbox=(0, 900, 300, 170), text="あいうえお", orientation="vertical")
-    tall_bio = TextBlock(bbox=(0, 1100, 300, 400), text="長い説明文が入る", orientation="vertical")
+    # A tall-narrow bio PARAGRAPH: many glyphs for its area (high density) -> kept.
+    tall_bio = TextBlock(bbox=(0, 1100, 300, 400), text="長い説明文が入る" * 8, orientation="vertical")
     kept = _drop_titles([title, header, bio, tall_bio], page_h=1600)
     assert title not in kept     # wide + tall -> title skipped
     assert header not in kept    # wide + tall -> header skipped
     assert bio in kept           # short -> kept
-    assert tall_bio in kept      # tall but narrow -> bio kept
+    assert tall_bio in kept      # tall but narrow + glyph-dense -> bio kept
+
+
+def test_drop_titles_skips_vertical_brush_title():
+    """A large vertical brush title (few glyphs for its area) is title art —
+    manga-ocr misreads it (job-3 p187 月夜に提灯 -> 提出), so leave it as-is."""
+    from app.pipeline.types import TextBlock
+
+    # 379x437 = 165,623 px2, 5 glyphs -> 0.3 glyphs/10k px2 (the real p187 title).
+    brush_title = TextBlock(bbox=(604, 142, 379, 437), text="月夜に提灯", orientation="vertical")
+    # A big vertical dialogue column: 179x486 = 86,994 px2, 13 glyphs -> 1.49 -> kept.
+    dialogue = TextBlock(bbox=(98, 187, 179, 486), text="全身の血の気が引く音がした", orientation="vertical")
+    kept = _drop_titles([brush_title, dialogue], page_h=1600)
+    assert brush_title not in kept   # large + sparse -> title art skipped
+    assert dialogue in kept          # big but glyph-dense -> dialogue kept
+
+
+def test_partition_shared_bubble_splits_stacked_balloons():
+    """Two vertically-stacked balloons whose regions overlap get split at the
+    midpoint of the shared band, so their centred text can't collide (job-3 p45)."""
+    from app.pipeline.render import _partition_shared_bubble
+    from app.pipeline.types import TextBlock
+
+    upper = TextBlock(bbox=(872, 102, 122, 179), text="次の講義", orientation="vertical")
+    lower = TextBlock(bbox=(773, 153, 105, 220), text="二度目の限界", orientation="vertical")
+    # overlapping regions (upper's bottom reaches into lower's top)
+    targets = [
+        (upper, (847, 83, 173, 229)),   # y 83..312
+        (lower, (748, 130, 159, 269)),  # y 130..399
+    ]
+    _partition_shared_bubble(targets)
+    (b1, r1), (b2, r2) = targets
+    # the upper region must end where the lower begins (no shared band)
+    assert r1[1] + r1[3] <= r2[1] or r2[1] + r2[3] <= r1[1]
+    # both keep their full width
+    assert r1[2] == 173 and r2[2] == 159
+    # both stay within the original union
+    assert r1[1] >= 83 and r2[1] + r2[3] <= 399
+
+
+def test_partition_shared_bubble_leaves_nestling_balloons_alone():
+    """Balloons that merely nestle (a few px of rounded corner) are NOT split —
+    their centred text never reaches the overlap."""
+    from app.pipeline.render import _partition_shared_bubble
+    from app.pipeline.types import TextBlock
+
+    a = TextBlock(bbox=(100, 100, 100, 200), text="あ", orientation="vertical")
+    b = TextBlock(bbox=(300, 250, 100, 200), text="い", orientation="vertical")
+    ra = (90, 90, 150, 220)   # y 90..310
+    rb = (290, 290, 150, 220)  # y 290..510  -> 20px vertical overlap, ~9% of 220
+    targets = [(a, ra), (b, rb)]
+    _partition_shared_bubble(targets)
+    assert targets[0][1] == ra and targets[1][1] == rb  # untouched
+
+
+def test_partition_shared_bubble_ignores_non_overlapping():
+    from app.pipeline.render import _partition_shared_bubble
+    from app.pipeline.types import TextBlock
+
+    a = TextBlock(bbox=(100, 100, 100, 200), text="あ", orientation="vertical")
+    b = TextBlock(bbox=(100, 500, 100, 200), text="い", orientation="vertical")
+    targets = [(a, (90, 90, 150, 220)), (b, (90, 490, 150, 220))]
+    _partition_shared_bubble(targets)
+    assert targets[0][1] == (90, 90, 150, 220)
+    assert targets[1][1] == (90, 490, 150, 220)
 
 
 def test_split_bullet_lines_splits_stat_columns():

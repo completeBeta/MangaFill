@@ -2,6 +2,31 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.22] - 2026-09-18
+
+### Fixed
+- **Two stacked speech balloons no longer print their English through each other.**
+  The detector returns two overlapping balloon boxes for balloons that touch (or one
+  figure-eight), `find_parent_bubble` maps each dialogue block to its own balloon, and
+  the typesetter centred each into the whole of its balloon — so where the bboxes
+  overlapped, the two texts interleaved (job-3 p45 "ATTEMPT" through "IN MIND-", p72
+  "PRACTICAL" through "ADVERTISE", p12 "AT BOTH" through "INCHES").
+  `_partition_shared_bubble` now reconciles a vertically-overlapping balloon pair by
+  splitting the shared band at its midpoint (the upper region stops there, the lower
+  starts there), so each block is centred into its own half. It only fires on the
+  genuine stacked case — the regions sharing a vertical band of ≥40% of the smaller
+  one — so balloons that merely nestle (a few px of rounded corner) are untouched.
+  Measured over the 13 worst pages with the real detector + fitter: drawn-English
+  overlap **45,738px² → 0**, no page made worse, no block lettered larger.
+- **A large vertical brush title is no longer erased and replaced with a mistranslation.**
+  `_drop_titles` only caught horizontal titles, so a big vertical brush title (job-3
+  p187's 月夜に提灯, 379×437) was read as vertical dialogue, OCR'd WRONG (提灯 → 提出,
+  "lantern" → "submitted"), erased and lettered as "SUBMITTED ON A MOONLIT NIGHT". A
+  real vertical dialogue column packs many glyphs into its area; a brush title has a
+  few large strokes. Measured over every job-3 vertical block: the title is the ONLY
+  one ≥100,000px² AND under 0.8 glyphs per 10k px² (0.3; the next-lowest real dialogue
+  is 1.08). Large + glyph-sparse vertical blocks are now left as art.
+
 ## [0.27.21] - 2026-09-18
 
 ### Fixed
