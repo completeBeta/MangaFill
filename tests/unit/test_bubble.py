@@ -86,3 +86,46 @@ def test_find_speech_box_coloured_box():
     assert c is not None
     cx, cy, cw, ch = c
     assert cw >= 100 and ch >= 80                       # recovered most of the box
+
+
+def test_find_balloon_gap_tolerant_recovers_tall_balloon_with_interior_art():
+    """A tall balloon with a dark art blob in its lower half: the plain white flood
+    stops at the art, but the gap-tolerant scan bridges it and recovers the full span."""
+    import numpy as np
+    from app.pipeline.bubble import find_balloon_gap_tolerant
+    # white page, tall balloon x[100..300] y[50..500]. The interior art (a chibi) is
+    # NOT a solid block — it has white gaps between its strokes, which is exactly
+    # what the gap tolerance bridges (each dark run is <= gap px).
+    g = np.full((600, 400), 255, dtype=np.uint8)
+    g[0:50, :] = 30           # page background above balloon
+    g[500:600, :] = 30        # below balloon
+    g[:, 0:100] = 30; g[:, 300:400] = 30
+    # chibi strokes: several thin dark bands with white between them
+    for yy in range(300, 480, 18):
+        g[yy:yy + 10, 120:280] = 30
+    block = (150, 60, 100, 200)  # text column at the top of the balloon
+    res = find_balloon_gap_tolerant(g, block)
+    assert res is not None
+    # recovers a span much taller than the block (bridges the chibi strokes)
+    assert res[3] > 1.3 * block[3]
+    # encloses the block vertically
+    assert res[1] <= block[1] and res[1] + res[3] >= block[1] + block[3]
+
+
+def test_find_balloon_gap_tolerant_returns_none_for_free_text_on_art():
+    """Free-floating text over dark artwork (no enclosing white balloon) -> None."""
+    import numpy as np
+    from app.pipeline.bubble import find_balloon_gap_tolerant
+    g = np.full((600, 400), 40, dtype=np.uint8)  # all dark artwork
+    block = (150, 60, 100, 200)
+    assert find_balloon_gap_tolerant(g, block) is None
+
+
+def test_find_balloon_gap_tolerant_rejects_page_wide_span():
+    """A span that runs the full page height is the page background, not a balloon."""
+    import numpy as np
+    from app.pipeline.bubble import find_balloon_gap_tolerant
+    g = np.full((600, 400), 255, dtype=np.uint8)  # all white
+    block = (150, 60, 100, 200)
+    # span reaches both page edges -> rejected
+    assert find_balloon_gap_tolerant(g, block) is None

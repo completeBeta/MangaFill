@@ -246,3 +246,121 @@ def find_speech_box(
             continue
         return (int(gx), int(gy), int(rw), int(rh))
     return None
+
+
+def find_balloon_gap_tolerant(
+    gray: np.ndarray,
+    bbox: tuple,
+    margin: int = 200,
+    thresh: int = 205,
+    gap: int = 22,
+    min_area_ratio: float = 1.2,
+    max_area_ratio: float = 9.0,
+) -> tuple | None:
+    """Recover a tall balloon whose interior art breaks the plain white flood.
+
+    `find_container` flood-fills only CONNECTED white pixels, so a balloon with a
+    chibi / face / hand drawn inside its lower half is split in two: the flood
+    reaches only the white cap above the art, the container check fails, and the
+    caller falls back to lettering the tight text box — which sits at the TOP of
+    the tall balloon, so the English is top-aligned with a big empty gap below
+    (job-3 p15's "THAT'S RIGHT!..." balloon). This recovers the balloon's full
+    vertical extent by scanning down (and up) the text column's centre, bridging
+    over dark art blobs up to `gap` px tall (a chibi is art, not the balloon
+    outline; the outline is where the white STOPS for good).
+
+    Returns (x, y, w, h) of the recovered balloon, or None when the column has no
+    enclosing white body at all (free-floating text over artwork — leave it to
+    the caption path). Width comes from the widest white run within the vertical
+    span, so the lettering keeps the balloon's full width.
+    """
+    x, y, w, h = bbox
+    H, W = gray.shape
+    if w <= 0 or h <= 0:
+        return None
+    cx = min(W - 1, max(0, x + w // 2))
+    # centre column of the text box, and a couple of neighbours for robustness
+    cols = [cx]
+    for off in (w // 4, -w // 4):
+        c2 = min(W - 1, max(0, cx + off))
+        if c2 != cx:
+            cols.append(c2)
+
+    def span(col_idx: int):
+        col = gray[:, col_idx]
+        # walk up from the block top
+        top = y
+        g = 0
+        i = y
+        while i >= 0:
+            if col[i] >= thresh:
+                top = i
+                g = 0
+            else:
+                g += 1
+                if g > gap:
+                    break
+            i -= 1
+        # walk down from the block bottom
+        bot = y + h
+        g = 0
+        i = y + h
+        while i < H:
+            if col[i] >= thresh:
+                bot = i
+                g = 0
+            else:
+                g += 1
+                if g > gap:
+                    break
+            i += 1
+        return top, bot
+
+    # take the tallest span among the sampled columns
+    best = None
+    for c in cols:
+        t, b = span(c)
+        if best is None or (b - t) > (best[1] - best[0]):
+            best = (t, b)
+    top, bot = best
+    span_h = bot - top
+    if span_h < min_area_ratio * h or span_h > max_area_ratio * h:
+        return None
+    # the recovered balloon must actually enclose the text box vertically
+    if top > y + 4 or bot < y + h - 4:
+        return None
+    # Reject a span that runs to the page edge in both directions: that is the
+    # page's own white background / a balloon chain, not one balloon. A real
+    # balloon has a bounded outline, so its interior stops well short of the page
+    # on at least one side.
+    if top <= 2 and bot >= H - 3:
+        return None
+    # And it must not swallow neighbouring balloons: cap the total span at a few
+    # times the text column's height so a merged figure-eight or a page of
+    # connected balloons is left to the partition logic instead.
+    if span_h > 2.5 * h:
+        return None
+
+    # Width: the widest white run within the vertical span, measured at the
+    # block's own rows (the balloon is at least as wide as the text column).
+    y0 = max(0, top)
+    y1 = min(H, bot + 1)
+    sub = gray[y0:y1, :]
+    white = sub >= thresh
+    # keep the contiguous run of columns that are white over most of the span
+    frac = white.mean(axis=0)
+    good = frac > 0.5
+    if not good.any():
+        return None
+    # the run that contains cx
+    left = cx
+    while left - 1 >= 0 and good[left - 1]:
+        left -= 1
+    right = cx
+    while right + 1 < W and good[right + 1]:
+        right += 1
+    bw = right - left + 1
+    if bw < w:
+        left = x
+        bw = w
+    return (int(left), int(top), int(bw), int(span_h))

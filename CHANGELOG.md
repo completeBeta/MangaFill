@@ -2,6 +2,25 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.23] - 2026-09-18
+
+### Fixed
+- **Tall balloons with art inside no longer leave the English top-aligned.** A balloon
+  with a chibi / face / hand drawn in its lower half splits the white flood-fill, so
+  neither the RT-DETR detector nor `find_container` recovers its interior — and the
+  block fell back to lettering its tight text box, which sits at the TOP of the tall
+  balloon, leaving the English hugging the top edge with a big empty gap below (job-3
+  p15's "THAT'S RIGHT!..." balloon). `bubble.find_balloon_gap_tolerant` now recovers
+  the balloon's full vertical extent by scanning the text column and bridging over
+  interior art blobs (a chibi's strokes have white between them; the balloon outline
+  is where the white stops for good), so the lettering is centred in the whole balloon.
+  It only fires as a last resort — when the detector finds no bubble AND
+  `find_container` fails — and it rejects a span that runs to the page edge or swallows
+  neighbouring balloons (those stay with the partition logic). Measured over 67
+  vertical blocks on job-3 pages 11-15: it fires exactly twice, both the tall
+  interior-art balloons on p15; the working stacked-balloon pages (p12) are untouched.
+  3 new unit tests; 265 pass.
+
 ## [0.27.22] - 2026-09-18
 
 ### Fixed

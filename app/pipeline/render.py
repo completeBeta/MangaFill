@@ -25,7 +25,7 @@ import re
 import numpy as np
 from PIL import Image
 
-from .bubble import find_container, find_speech_box, is_free_floating, region_angle
+from .bubble import find_container, find_speech_box, is_free_floating, region_angle, find_balloon_gap_tolerant
 from .detector import detect_containers, find_parent_bubble
 from .ingest import load_image
 from .inpaint import inpaint_text, stroke_boxes
@@ -1748,10 +1748,21 @@ def render_translated_page(
                     region = tuple(parent)
                     shaped.add(id(b))
                 else:
-                    # Free text / caption: no bubble edge to avoid (see
-                    # `_free_text_region` for the tall-narrow widening rule).
-                    region = _free_text_region(b.bbox, page_w, page_h, gray=gray_page,
-                                               obstacles=_sibling_boxes(blocks, b) + claimed)
+                    # A tall balloon with art drawn inside its lower half splits the
+                    # white flood, so neither the detector nor find_container recovers
+                    # it — and lettering the tight text box leaves the English
+                    # top-aligned in the balloon (job-3 p15). Recover the balloon's
+                    # full vertical extent (bridging over the interior art) before
+                    # falling back to the free-text strip.
+                    gt = find_balloon_gap_tolerant(gray_page, b.bbox)
+                    if gt is not None:
+                        region = tuple(gt)
+                        shaped.add(id(b))
+                    else:
+                        # Free text / caption: no bubble edge to avoid (see
+                        # `_free_text_region` for the tall-narrow widening rule).
+                        region = _free_text_region(b.bbox, page_w, page_h, gray=gray_page,
+                                                   obstacles=_sibling_boxes(blocks, b) + claimed)
             targets.append((b, region))
             claimed.append(tuple(int(v) for v in region))
             erase.extend(_erase_rects(gray_page, b.bbox))
