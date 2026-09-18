@@ -955,7 +955,8 @@ def _drop_spurious_carryover(carryover: list, blocks: list) -> list:
     return [c for c in (carryover or []) if not any(_intersects(tuple(c[1]), ob) for ob in own)]
 
 
-def _free_text_region(bbox: tuple, page_w: int, page_h: int) -> tuple:
+def _free_text_region(bbox: tuple, page_w: int, page_h: int, gray=None,
+                      obstacles=None) -> tuple:
     """Typeset region for free-floating text with no enclosing speech box.
 
     English is HORIZONTAL, so a tall-narrow source box (Japanese tategaki
@@ -964,7 +965,9 @@ def _free_text_region(bbox: tuple, page_w: int, page_h: int) -> tuple:
     microscopic text. Only tall-narrow text gets the wide strip; wide footnotes
     and small labels keep their own width (see `_caption_region`).
     """
-    return _caption_region(bbox, page_w, page_h) if bbox[3] > bbox[2] * 1.5 else bbox
+    if bbox[3] > bbox[2] * 1.5:
+        return _caption_region(bbox, page_w, page_h, gray=gray, obstacles=obstacles)
+    return bbox
 
 
 # A carryover patch only MEANS something if the previous page actually drew
@@ -1102,7 +1105,120 @@ def _expand_box(bbox: tuple, wx: float = 0.25, hy: float = 0.20) -> tuple:
     return (max(0, x - ex), max(0, y - ey), w + 2 * ex, h + 2 * ey)
 
 
-def _caption_region(bbox: tuple, page_w: int, page_h: int) -> tuple:
+def _sibling_boxes(blocks, block) -> list:
+    """The other blocks' source boxes — a caption must not be lettered over them.
+
+    Blocks nested inside the source box (its own furigana / sub-lines) are part
+    of the same text, not neighbours, so they are not obstacles.
+    """
+    sx, sy, sw, sh = block.bbox
+    out: list = []
+    for b in blocks:
+        if b is block or b.orientation == "furigana":
+            continue
+        bx = tuple(int(v) for v in b.bbox)
+        if bx[2] <= 0 or bx[3] <= 0:
+            continue
+        ox = max(0, min(sx + sw, bx[0] + bx[2]) - max(sx, bx[0]))
+        oy = max(0, min(sy + sh, bx[1] + bx[3]) - max(sy, bx[1]))
+        if ox * oy >= 0.5 * (bx[2] * bx[3]):
+            continue
+        out.append(bx)
+    return out
+
+
+# Free-floating caption regions must avoid the artwork AND the other text.
+#
+# `_caption_region` widens a tall-narrow source column so the horizontal English
+# has room, but a blind rectangle ignores what it lands on: on job-3 page 19 a
+# 112px column's strip was widened 153px to the RIGHT — straight over the
+# neighbouring column — and its 1.5x height expansion lifted the lettering out of
+# the panel, so two English letterings were printed through each other across the
+# panel rule. The strip is now grown from the source box into free space only:
+# space the original page leaves un-inked and that no sibling block owns.
+_CAPTION_INK = 150          # darker than this is artwork / glyph stroke / panel rule
+_CAPTION_RUN = 3            # this many consecutive dark pixels mark a stroke
+_CAPTION_DARK_SHARE = 0.06  # ...or this much of the band being dark does
+_CAPTION_OBSTACLE_GAP = 4   # keep this much clear of a sibling block's box
+
+
+def _caption_blocked(gray, obstacles=None, gap: int = _CAPTION_OBSTACLE_GAP) -> np.ndarray:
+    """Pixels a caption's lettering may not be drawn over.
+
+    Ink from the original page (artwork, glyph strokes, panel rules) plus every
+    sibling block's box: the sibling's source text is erased and lettered
+    separately, so English must never be drawn there.
+    """
+    blocked = np.asarray(gray) < _CAPTION_INK
+    H, W = blocked.shape[:2]
+    for box in obstacles or ():
+        try:
+            ox, oy, ow, oh = (int(v) for v in tuple(box)[:4])
+        except (TypeError, ValueError):
+            continue
+        x0, y0 = max(0, ox - gap), max(0, oy - gap)
+        x1, y1 = min(W, ox + ow + gap), min(H, oy + oh + gap)
+        if x1 > x0 and y1 > y0:
+            blocked[y0:y1, x0:x1] = True
+    return blocked
+
+
+def _max_run(mask: np.ndarray) -> np.ndarray:
+    """Per-column longest run of True in a 2D mask (row-major scan)."""
+    cols = mask.shape[1]
+    run = np.zeros(cols, dtype=np.int32)
+    best = np.zeros(cols, dtype=np.int32)
+    for r in range(mask.shape[0]):
+        run = np.where(mask[r], run + 1, 0)
+        np.maximum(best, run, out=best)
+    return best
+
+
+def _free_lines(blocked: np.ndarray, lo: int, hi: int, axis: int) -> np.ndarray:
+    """True for each line that is free of ink across the band [lo, hi).
+
+    `axis=0` scans a row band and reports per COLUMN; `axis=1` scans a column
+    band and reports per ROW. A line is blocked when it carries a stroke
+    (`_CAPTION_RUN` consecutive dark pixels) or a lot of darkness
+    (`_CAPTION_DARK_SHARE`) — the run test lets dense screentone stay usable as
+    lettering space while a 1-2px panel rule, a glyph stroke or a mass of hair
+    still stops the strip.
+    """
+    lo, hi = max(0, lo), min(blocked.shape[axis], hi)
+    if hi - lo < 1:
+        return np.zeros(0, dtype=bool)
+    band = blocked[lo:hi, :] if axis == 0 else blocked[:, lo:hi].T
+    runs = _max_run(band)
+    share = band.mean(axis=0)
+    return ~((runs >= _CAPTION_RUN) | (share >= _CAPTION_DARK_SHARE))
+
+
+def _run_room(free: np.ndarray, box0: int, box1: int, limit: int) -> int:
+    """How far [box0, box1) can grow BOTH ways through contiguous free lines."""
+    n = len(free)
+    if n == 0:
+        return 0
+    box0 = max(0, min(box0, n))
+    box1 = max(0, min(box1, n))
+    if box1 <= box0:
+        return 0
+    room = 0
+    side = 0
+    i = box0 - 1
+    while i >= 0 and free[i] and side < limit:
+        side += 1
+        i -= 1
+    room = side
+    side = 0
+    i = box1
+    while i < n and free[i] and side < limit:
+        side += 1
+        i += 1
+    return min(room, side, limit)
+
+
+def _caption_region(bbox: tuple, page_w: int, page_h: int, gray=None,
+                    obstacles=None) -> tuple:
     """Region for free-floating text that has no enclosing speech box.
 
     English is horizontal, so a *vertical* caption (问世间情为何物) needs width, and
@@ -1110,6 +1226,11 @@ def _caption_region(bbox: tuple, page_w: int, page_h: int) -> tuple:
     labels / single characters must NOT be widened across the page (that spilled
     UI text into neighbouring panels). Only tall-narrow text gets the wide strip;
     everything else keeps its own width and just gains vertical room.
+
+    With `gray` (the ORIGINAL page) the strip is also grown into free space only:
+    the source box expands symmetrically as far as the page stays un-inked and no
+    sibling block owns the space, so the English stays where the source text was
+    instead of being lettered over artwork or over the neighbouring column.
     """
     x, y, w, h = bbox
     if h > w * 1.5:
@@ -1128,10 +1249,29 @@ def _caption_region(bbox: tuple, page_w: int, page_h: int) -> tuple:
         nw = max(w, min(int(h * 1.5), int(page_w * 0.6), int(w * 2.5) + 24))
     else:
         nw = w
-    nx = max(0, min(x, page_w - nw))  # keep it on-page
     nh = max(int(h * 1.5), int(page_h * 0.06))
-    ny = max(0, y + h // 2 - nh // 2)  # center the strip on the source text
-    return (nx, ny, nw, nh)
+    if gray is None:  # legacy geometry, no page to check against
+        nx = max(0, min(x, page_w - nw))  # keep it on-page
+        ny = max(0, y + h // 2 - nh // 2)  # center the strip on the source text
+        return (nx, ny, nw, nh)
+    blocked = _caption_blocked(gray, obstacles)
+    # A stored box can sit outside its page (a box recorded by an older render at
+    # a different scale); clamp instead of trusting it, or the run walks off the
+    # end of the mask.
+    H, W = blocked.shape[:2]
+    x, y = max(0, min(x, max(0, W - 1))), max(0, min(y, max(0, H - 1)))
+    w, h = max(1, min(w, W - x)), max(1, min(h, H - y))
+    max_x, max_y = (nw - w) // 2, (nh - h) // 2
+    free_cols = _free_lines(blocked, y, y + h, 0)
+    gx = _run_room(free_cols, x, x + w, max_x)
+    free_rows = _free_lines(blocked, x - gx, x + w + gx, 1)
+    gy = _run_room(free_rows, y, y + h, max_y)
+    # second pass: the taller/wider band can only ever shrink the other axis
+    gx = min(gx, _run_room(_free_lines(blocked, y - gy, y + h + gy, 0), x, x + w, max_x))
+    gy = min(gy, _run_room(_free_lines(blocked, x - gx, x + w + gx, 1), y, y + h, max_y))
+    nx = max(0, min(x - gx, page_w - (w + 2 * gx)))
+    ny = max(0, min(y - gy, page_h - (h + 2 * gy)))
+    return (nx, ny, w + 2 * gx, h + 2 * gy)
 
 
 def _build_blocks_from_det(det: dict, image_np: np.ndarray) -> list[TextBlock]:
@@ -1446,6 +1586,10 @@ def render_translated_page(
     # Blocks whose region is a speech balloon (not a bare rectangle): the
     # typesetter fits their lettering to the balloon's actual outline.
     shaped: set[int] = set()
+    # Regions already assigned on this page. A caption strip must also stay clear
+    # of THOSE (not just of the sibling's source box): two columns whose strips
+    # each stop short of the other's box still overlap in the gap between them.
+    claimed: list = []
     if lang in ("ko", "zh"):
         # Webtoon/manhua: the OCR box is the TIGHT text region, not the speech
         # box. Resolve the enclosing speech box in order of trust:
@@ -1488,7 +1632,11 @@ def render_translated_page(
                     # so letter it across a generous strip instead of fitting it to
                     # the source text's (tall-narrow or short-wide) box shape.
                     raw = None
-                    region = _caption_region(b.bbox, page_w, page_h)
+                    # The strip may only use space the page leaves un-inked and no
+                    # sibling block owns — otherwise the widened caption is lettered
+                    # over the neighbouring column's English or over the artwork.
+                    region = _caption_region(b.bbox, page_w, page_h, gray=gray_page,
+                                             obstacles=_sibling_boxes(blocks, b) + claimed)
             # Tilt the English lettering to match a slanted speech box. The
             # angle comes from the box's fill shape (region_angle), not the OCR
             # quad — the GPU worker returns only axis-aligned boxes. Vertical
@@ -1499,6 +1647,7 @@ def render_translated_page(
                 else 0.0
             )
             targets.append((b, region))
+            claimed.append(tuple(int(v) for v in region))
             erase.extend(_erase_rects(gray_page, b.bbox))
     elif bubbles is not None:
         for b in blocks:
@@ -1521,8 +1670,10 @@ def render_translated_page(
                 else:
                     # Free text / caption: no bubble edge to avoid (see
                     # `_free_text_region` for the tall-narrow widening rule).
-                    region = _free_text_region(b.bbox, page_w, page_h)
+                    region = _free_text_region(b.bbox, page_w, page_h, gray=gray_page,
+                                               obstacles=_sibling_boxes(blocks, b) + claimed)
             targets.append((b, region))
+            claimed.append(tuple(int(v) for v in region))
             erase.extend(_erase_rects(gray_page, b.bbox))
     else:
         gray = np.asarray(image.convert("L"))

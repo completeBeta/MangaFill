@@ -2,6 +2,29 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.20] - 2026-09-18
+
+### Fixed
+- **A widened caption strip is no longer lettered over the artwork or over the
+  neighbouring column's English.** Free-floating vertical text with no speech box
+  (`_caption_region`) was widened into a BLIND rectangle: on job-3 page 19 a 112px
+  column's strip grew 153px to the RIGHT — straight over the next column's text — and
+  its 1.5x height expansion lifted the lettering out of the panel, so two English
+  letterings were printed through each other across the panel rule. The strip is now
+  grown from the source box into free space only, and **symmetric** along both axes so
+  the English stays where the source text was (the old strip was anchored at the
+  column's left edge and centred 1.5x-tall). It stops at ink — a 3px run or 6% dark
+  across the band catches glyph strokes, artwork and 1-2px panel rules while light
+  screentone stays usable lettering space — and at every other block's source box or
+  already-claimed region on the page. The same code path serves the ko/zh caption
+  fallback.
+  Measured on job 3 page 19 with the real detector and the real fitter: **drawn-English
+  overlap 10,220px² → 0**, regions covering artwork without erasing it 7 → 5, no block
+  lettered larger, 3 blocks lettered smaller (they now fit the space that exists).
+- A stored block box that runs off its page (job-3 page 40 carries `x+w=797` on a 690px
+  page, recorded by an older render) no longer raises `IndexError` out of the strip
+  maths — the box is clamped to the image.
+
 ## [0.27.19] - 2026-09-17
 
 ### Fixed
