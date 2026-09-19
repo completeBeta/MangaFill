@@ -58,6 +58,36 @@ def test_sfx_is_lettered_to_fill_its_box():
     assert cols[0] >= box[0] and cols[-1] <= box[0] + box[2]
 
 
+def test_vertical_sfx_is_lettered_to_fill_its_box():
+    """A `vertical` drawn SFX must also letter at a box-derived size.
+
+    The classification guard is only half the fix: job-2 page 40's stacked `더다다`
+    has to reach `typeset` with `is_sfx` set, i.e. 61px in its 476x792 footprint
+    rather than the 21px page cap (measured: 21px -> 61px on the real page).
+    """
+    fp = _font()
+    if fp is None:
+        return  # font unavailable on this host; skip
+    box = (196, 756, 476, 792)
+    img = Image.new("RGB", (690, 1600), (255, 255, 255))
+    plain = typeset_page(img, [TextBlock(bbox=box, text="더다다",
+                                         translation="Th-thump",
+                                         orientation="vertical")], font_path=fp)
+    sfx = typeset_page(img, [TextBlock(bbox=box, text="더다다",
+                                       translation="Th-thump",
+                                       orientation="vertical", is_sfx=True)],
+                       font_path=fp)
+    assert _ink_height(sfx) > 2 * _ink_height(plain), (
+        f"sfx={_ink_height(sfx)}px vs plain={_ink_height(plain)}px — the vertical "
+        "SFX is still lettered at the page cap"
+    )
+    a = np.asarray(sfx.convert("L"))
+    rows = np.where((a < 100).sum(axis=1) > 0)[0]
+    cols = np.where((a < 100).sum(axis=0) > 0)[0]
+    assert rows[0] >= box[1] and rows[-1] <= box[1] + box[3]
+    assert cols[0] >= box[0] and cols[-1] <= box[0] + box[2]
+
+
 def test_sfx_text_is_uppercased():
     fp = _font()
     if fp is None:
@@ -89,8 +119,31 @@ def test_is_drawn_sfx_rejects_long_text():
 
 
 def test_is_drawn_sfx_rejects_vertical_text():
-    """Vertical art text still needs `_caption_region`'s widening."""
+    """A tall-narrow vertical column still needs `_caption_region`'s widening.
+
+    Horizontal English cannot fill a 200x1000 column, so lettering it into its own
+    box would shrink it to nothing — job-1 page 5's 72x461 tategaki caption.
+    """
     b = TextBlock(bbox=(100, 100, 60, 400), text="곳", orientation="vertical")
+    assert not _is_drawn_sfx(b)
+    tall_narrow = TextBlock(bbox=(0, 0, 200, 1000), text="조용", orientation="vertical")
+    assert not _is_drawn_sfx(tall_narrow)
+
+
+def test_is_drawn_sfx_accepts_a_stacked_vertical_sfx():
+    """A stacked drawn SFX is classified `vertical` but is wide enough to fill.
+
+    Job-2 page 40's `더다다` (476x792, three glyphs down a page cut) lettered at the
+    21px page cap — one word in a 476x792 footprint — while the identical construct
+    on page 39 (`튼다다`, 502x735, labelled `horizontal`) lettered at 109px.
+    """
+    b = TextBlock(bbox=(196, 756, 476, 792), text="더다다", orientation="vertical")
+    assert _is_drawn_sfx(b)
+
+
+def test_is_drawn_sfx_rejects_a_small_vertical_box():
+    """Same aspect ratio, but a label-sized box: the page cap is not the problem."""
+    b = TextBlock(bbox=(200, 593, 117, 208), text="大吉", orientation="vertical")
     assert not _is_drawn_sfx(b)
 
 

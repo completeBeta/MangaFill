@@ -2,6 +2,25 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.26] - 2026-09-19
+
+### Fixed
+- **A *stacked* drawn sound effect was still lettered at the page-width cap — erased
+  art came back as one tiny word.** v0.27.6 routes a drawn SFX through its own tight
+  box so the font comes from the footprint instead of the page (`width/32` = 21px on a
+  690px webtoon), but `render._is_drawn_sfx` only accepted blocks the classifier
+  labelled `horizontal`. A stacked SFX — three big glyphs running down a page cut — is
+  labelled `vertical`, so it fell through to `_caption_region`, where the **page cap
+  still applied**: job-2 page 40's `더다다` (476x792) lettered at **21px** while the
+  identical construct on page 39 (`튼다다`, 502x735, labelled `horizontal`) lettered at
+  **109px**. A box that is wide enough to hold horizontal English (`w >= 0.55h`) and
+  large (`>= 60000px²`) now takes the drawn-SFX path too: page 40 measures 21px -> 61px,
+  centred inside the erased footprint and clear of the panel edges. Tall-narrow columns
+  (job-1 page 5's 72x461 tategaki caption) and label-sized boxes keep the caption
+  treatment — English cannot fill a vertical column. The predicate was dry-run over
+  every stored ko/zh block of jobs 1-3 and flips **exactly this one block**, so no
+  other page re-letters.
+
 ## [0.27.25] - 2026-09-19
 
 ### Fixed

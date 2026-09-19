@@ -1,3 +1,3 @@
 """Manga Fill — translate raw manga/manhwa/manhua to English."""
 
-__version__ = "0.27.25"
+__version__ = "0.27.26"

@@ -718,10 +718,22 @@ def _is_drawn_sfx(block) -> bool:
     t = (block.text or "").strip()
     if not t or len(t) > 8:
         return False
-    if block.orientation != "horizontal":
-        return False  # vertical art text needs `_caption_region`'s widening
     x, y, w, h = block.bbox
-    return h >= 28    # a drawn glyph block, not a small label/stamp
+    if h < 28 or w * h < 60000:
+        return False  # a small label/stamp, not a drawn glyph block
+    if block.orientation == "horizontal":
+        return True
+    # A drawn SFX is often STACKED down the page (three big glyphs across a page
+    # cut), so the classifier labels it `vertical` and it used to fall through to
+    # `_caption_region` — where the font cap comes from the PAGE width (690/32 =
+    # 21px on a webtoon) and erased art came back as a 21px word. Job-2 page 40's
+    # `더다다` (476x792) lettered at 21px while its twin on page 39 (`튼다다`,
+    # 502x735, labelled horizontal) got 109px; the blocks differ only in that
+    # label. A wide box can hold horizontal English at a size that fills it, so
+    # letter it into its own footprint (measured to flip exactly this one block
+    # across jobs 1-3). A tall-narrow column (w < 0.55h) still keeps
+    # `_caption_region`'s widening — English cannot fill a vertical column.
+    return w >= 0.55 * h
 
 
 _STUB_ART_MIN_AREA = 25000
