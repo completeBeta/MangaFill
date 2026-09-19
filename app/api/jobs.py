@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import Job, Page, TextBlock
+from app.services import audit
 from app.services.job_engine import (
     _delete_job_files,
     _job_dir,
@@ -106,8 +107,10 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
     if job is None:
         raise HTTPException(404, "job not found")
     _delete_job_files(job_id)
+    name = job.name
     db.delete(job)
     db.commit()
+    audit.record("jobs.delete", target=f"job {job_id}", detail={"name": name})
     return {"ok": True}
 
 
@@ -115,6 +118,10 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
 def clear_all(db: Session = Depends(get_db)):
     """Delete every job — DB rows and on-disk files."""
     n = clear_all_jobs(db)
+    # Destructive and irreversible: say so explicitly, with the count. Without this
+    # the action was invisible in the log (the complaint that started this).
+    audit.record("jobs.clear_all", target="all jobs",
+                 detail={"jobs_deleted": n, "irreversible": True})
     return {"ok": True, "deleted": n}
 
 
@@ -143,6 +150,8 @@ def start_job(job_id: int, db: Session = Depends(get_db)):
         job.finished_at = None
         job.updated_at = _now()
         db.commit()
+        audit.record("jobs.resume", target=f"job {job_id}",
+                     detail={"name": job.name, "status": job.status})
     return _job_dict(job, with_pages=True)
 
 
@@ -198,6 +207,8 @@ def rerender_pages(job_id: int, payload: dict | None = Body(None), db: Session =
     job.finished_at = None
     job.updated_at = _now()
     db.commit()
+    audit.record("jobs.rerender", target=f"job {job_id}",
+                 detail={"pages": len(pages)})
     return {"ok": True, "pages_queued": len(pages),
             "indices": sorted(p.index for p in pages)}
 
@@ -250,6 +261,7 @@ def pause_job(job_id: int, db: Session = Depends(get_db)):
         job.status = "paused"
         job.updated_at = _now()
         db.commit()
+        audit.record("jobs.pause", target=f"job {job_id}", detail={"name": job.name})
     return _job_dict(job)
 
 
@@ -263,6 +275,7 @@ def stop_job(job_id: int, db: Session = Depends(get_db)):
         job.status = "cancelled"
         job.updated_at = _now()
         db.commit()
+        audit.record("jobs.stop", target=f"job {job_id}", detail={"name": job.name})
     return _job_dict(job)
 
 

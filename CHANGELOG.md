@@ -2,6 +2,41 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.24] - 2026-09-18
+
+### Added
+- **Audit trail — every user and system action is now logged.** Destructive actions
+  left no trace at all before this: "Clear all jobs" deleted every job and said
+  nothing in the log. New `app/services/audit.py` records each action to **two
+  sinks** — the app log file (which `/api/logs` tails, so it shows up in the Logs
+  tab) and a durable `audit_log` table — and distinguishes the **actor**
+  (`user` = an API call, `system` = the engine acting on its own). An HTTP
+  middleware records *every* POST/PUT/PATCH/DELETE with its status and duration, so
+  nothing is missed even on an endpoint nobody instrumented; the important actions
+  also emit a richer semantic entry (Clear all reports how many jobs and that it is
+  irreversible; delete / resume / pause / stop name the job; a re-render reports the
+  page count; the engine logs `job.finished` with page totals and failures).
+  A failing audit write can never break the action it describes. New `GET
+  /api/audit?limit=` returns the durable rows newest-first. GETs are deliberately
+  not logged — the dashboard polls `/api/jobs` every few seconds and those would
+  bury the real actions.
+
+### Changed
+- **Upload page: the file picker is now a proper dropzone.** The bare
+  `<input type="file">` rendered the browser's LIGHT default control ("Choose
+  Files" / "No file chosen") sitting inside the dark form — the same unthemed-control
+  bug as the old viewer button. The Files field is now a themed dashed area that
+  states it accepts drops ("Drag & drop your pages here — or click to browse —
+  .jpg .png .webp, or a .cbz / .zip"), highlights in the accent colour while a drag
+  is over it, lists the selected filenames (first 6 + "+N more"), and is keyboard
+  reachable (`:focus-within`). The real input sits transparently on top of the area,
+  so a click anywhere opens the picker and `required` field validation still has a
+  focusable control. Dropped files are filtered to the accepted extensions, with
+  unsupported ones reported rather than silently ignored. The `input[type=file]`
+  selector was removed from the shared field rule so the native control can't
+  reappear.
+- `pyproject.toml` version was synced (it had drifted, still reading 0.27.21).
+
 ## [0.27.23] - 2026-09-18
 
 ### Fixed

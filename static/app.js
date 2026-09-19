@@ -328,6 +328,67 @@ $("#refresh-jobs").addEventListener("click", loadJobs);
 $("#clear-all-jobs").addEventListener("click", clearAllJobs);
 
 // ---------- upload ----------
+// Dropzone: the area is the visible affordance; the file input sits transparently
+// on top of it (so a click anywhere opens the picker and `required` can still be
+// focused). Drop handling is explicit so the highlight and the file list are
+// deterministic across browsers.
+const dropzone = $("#upload-dropzone");
+const fileInput = $("#upload-files");
+const fileListEl = $("#upload-filelist");
+const UPLOAD_EXTS = [".jpg", ".jpeg", ".png", ".webp", ".cbz", ".zip"];
+
+function renderUploadFileList() {
+  const files = fileInput.files;
+  if (!files || !files.length) {
+    fileListEl.innerHTML = "";
+    return;
+  }
+  const names = Array.from(files).map((f) => f.name);
+  const shown = names.slice(0, 6);
+  const extra = names.length - shown.length;
+  fileListEl.innerHTML =
+    `<div class="dropzone-count">${files.length} file${files.length === 1 ? "" : "s"} selected</div>` +
+    `<ul>${shown.map((n) => `<li>${esc(n)}</li>`).join("")}` +
+    (extra > 0 ? `<li class="dropzone-more">+${extra} more</li>` : "") +
+    `</ul>`;
+}
+
+fileInput.addEventListener("change", renderUploadFileList);
+
+["dragenter", "dragover"].forEach((ev) =>
+  dropzone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropzone.classList.add("dragover");
+  })
+);
+
+dropzone.addEventListener("dragleave", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!dropzone.contains(e.relatedTarget)) dropzone.classList.remove("dragover");
+});
+
+dropzone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropzone.classList.remove("dragover");
+  const dropped = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+  if (!dropped.length) return;
+  const ok = dropped.filter((f) => UPLOAD_EXTS.some((x) => f.name.toLowerCase().endsWith(x)));
+  const skipped = dropped.length - ok.length;
+  if (!ok.length) {
+    $("#upload-status").textContent = `Unsupported file type — use ${UPLOAD_EXTS.join(" ")}.`;
+    return;
+  }
+  const dt = new DataTransfer();
+  ok.forEach((f) => dt.items.add(f));
+  fileInput.files = dt.files;
+  renderUploadFileList();
+  $("#upload-status").textContent = skipped
+    ? `${skipped} file(s) skipped (unsupported type).` : "";
+});
+
 $("#upload-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const files = $("#upload-files").files;
@@ -344,6 +405,7 @@ $("#upload-form").addEventListener("submit", async (e) => {
     const job = await api("/api/jobs", { method: "POST", body: fd });
     status.textContent = `Job #${job.id} queued (${job.pages_total} pages).`;
     $("#upload-form").reset();
+    renderUploadFileList();  // reset() fires no change event, so clear the list here
     switchTab("jobs");
     loadJobs();
   } catch (err) {

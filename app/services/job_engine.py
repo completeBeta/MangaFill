@@ -19,6 +19,7 @@ from app.db import SessionLocal
 from app.models import Job, Model, Page, TextBlock
 from app.pipeline.render import render_translated_page
 from app.pipeline.translate import ProviderError
+from app.services import audit
 from app.services.logging import get_logger
 from app.services.pricing import compute_cost
 from app.settings_store import default_model, get_model, get_setting
@@ -346,6 +347,12 @@ def process_job(job_id: int) -> None:
         db.commit()
         log.info("job %s finished: status=%s (%d/%d pages, %d failed)",
                  job_id, job.status, done, total, len(failed_pages))
+        # System-side record: the engine finished a job on its own. Paired with the
+        # "user" entries, the log now shows who did what — not just the requests.
+        audit.record("job.finished", target=f"job {job_id}", actor="system",
+                     detail={"name": job.name, "status": job.status,
+                             "pages_done": done, "pages_total": total,
+                             "pages_failed": len(failed_pages)})
     except Exception as e:
         # Never let the worker die on one bad job.
         try:

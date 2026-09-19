@@ -62,11 +62,45 @@ h2 { margin-top: 0; font-size: 17px; }
 #upload-form, .settings-form { display: flex; flex-direction: column; gap: 14px; max-width: 460px; }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field span { color: var(--muted); font-size: 13px; }
-.field input[type=text], .field input[type=password], .field input[type=number], .field input[type=time], .field select, .field input[type=file] {
+.field input[type=text], .field input[type=password], .field input[type=number], .field input[type=time], .field select {
   background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
   padding: 8px 10px; border-radius: 6px; font-size: 14px;
 }
 .field code { font-size: 13px; }
+
+/* Upload dropzone. A bare <input type=file> renders the browser's LIGHT default
+   control ("Choose Files" + "No file chosen") inside the dark form — the same
+   unthemed-control bug as the old viewer button. Style the whole AREA instead and
+   hide the input transparently on top of it, so the light default can never show
+   while the input stays clickable and focusable (required-field validation needs
+   a focusable control). The area also advertises that it accepts drops. */
+.dropzone {
+  position: relative;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 20px 16px;
+  text-align: center;
+  transition: border-color .12s ease, background .12s ease;
+}
+.dropzone:hover { border-color: #3b4757; }
+.dropzone:focus-within { border-color: var(--accent); }
+.dropzone.dragover { border-color: var(--accent); background: rgba(79, 157, 255, .10); }
+.dropzone-input {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; cursor: pointer; z-index: 2;
+  background: none; border: 0; padding: 0;
+}
+.dropzone-inner { position: relative; z-index: 1; pointer-events: none; }
+.dropzone-icon { width: 26px; height: 26px; color: var(--muted); display: block; margin: 0 auto 8px; }
+.dropzone.dragover .dropzone-icon { color: var(--accent); }
+.dropzone-title { font-size: 14px; font-weight: 600; }
+.dropzone-hint { color: var(--muted); font-size: 13px; margin-top: 3px; }
+.dropzone-files { font-size: 13px; margin-top: 10px; }
+.dropzone-files ul { list-style: none; margin: 6px 0 0; padding: 0; text-align: left; max-height: 132px; overflow-y: auto; }
+.dropzone-files li { padding: 3px 0; border-top: 1px solid var(--border); word-break: break-all; }
+.dropzone-files .dropzone-count { color: var(--text); font-weight: 600; }
+.dropzone-files .dropzone-more { color: var(--muted); }
 .field.checkbox { flex-direction: row; align-items: center; gap: 8px; }
 .field.checkbox span { color: var(--text); font-size: 14px; }
 .hidden { display: none !important; }
