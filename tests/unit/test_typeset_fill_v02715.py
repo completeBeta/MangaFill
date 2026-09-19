@@ -81,18 +81,58 @@ def test_lettering_never_exceeds_its_box():
         assert tw <= w and th <= h, f"{text!r} overflowed {w}x{h} with {tw}x{th}"
 
 
-def test_word_list_lettering_is_rejected():
-    """3+ lines with nearly every one a single word is the look not to produce."""
+def test_word_list_look_is_a_tie_break_not_a_veto():
+    """v0.27.27. The stacked "word list" look is one to AVOID, but only when avoiding
+    it is nearly free.
+
+    It used to be a HARD exclusion, and because bigger letters wrap to fewer words per
+    line it deleted precisely the largest candidates — leaving the fitter to maximise
+    fill among the SMALL sizes. That is the "big balloon, tiny text" defect (measured:
+    20% of blocks, mean +31%, worst +100%). The stack is now allowed whenever it is the
+    larger size, and the chosen size must stay within one step of the maximum.
+    """
     fp = _fp()
     if not fp:
         return
-    # a narrow box where the biggest sizes can only stack one word per line
-    fitted = _fit("I'm sorry, big sister-", 150, 460, fp, max_font=50)
+    text = "I'm sorry, big sister-"
+    fitted = _fit(text, 150, 460, fp, max_font=50)
     assert fitted is not None
-    _size, lines, _f = fitted
-    if len(lines) >= 3:
-        lone = sum(1 for ln in lines if len(ln.split()) == 1)
-        assert lone < len(lines) - 1, f"lettered as a word list: {lines}"
+    size, lines, _f = fitted
+    # the geometric maximum for this box, computed independently
+    from PIL import Image, ImageDraw, ImageFont
+    from app.pipeline.typeset import _wrap
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    ref = None
+    for s in range(50, 7, -1):
+        f = ImageFont.truetype(fp, s)
+        ls = _wrap(probe, text, f, 150)
+        bb = probe.multiline_textbbox((0, 0), "\n".join(ls), font=f, spacing=2,
+                                      align="center", stroke_width=max(1, s // 8))
+        if bb[2] - bb[0] <= 150 and bb[3] - bb[1] <= 460:
+            ref = s
+            break
+    assert ref is not None
+    assert size >= ref - 1, (
+        f"the word-list veto is back: {size}px chosen where {ref}px fits (lines={lines})")
+
+
+def test_a_long_word_never_overflows_the_region():
+    """The size guarantee is a FLOOR, not a licence to spill: a word too wide for the
+    region must force a smaller size (or no fit), never overflow."""
+    fp = _fp()
+    if not fp:
+        return
+    from PIL import Image, ImageDraw
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    got = _fit("Extraordinary", 90, 400, fp, max_font=35)
+    if got is None:
+        return  # nothing fits at any size; the caller's fallback handles it
+    size, lines, font = got
+    widest = max(
+        probe.textbbox((0, 0), ln, font=font, stroke_width=max(1, size // 8))[2]
+        for ln in lines
+    )
+    assert widest <= 92, f"a line {widest}px wide overflowed a 90px region at {size}px"
 
 
 def test_two_word_block_may_stack():

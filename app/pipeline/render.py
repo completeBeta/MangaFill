@@ -29,6 +29,7 @@ from .bubble import find_container, find_speech_box, is_free_floating, region_an
 from .detector import detect_containers, find_parent_bubble
 from .ingest import load_image
 from .inpaint import inpaint_text, stroke_boxes
+from . import fitlog
 from .language import has_cjk_or_hangul
 from .ocr import ocr_crop
 from .ocr_multilingual import detect_language, drop_all_pipelines, read_boxes_text, is_noise_box
@@ -1783,6 +1784,7 @@ def render_translated_page(
             else:
                 parent = find_parent_bubble(bubbles, b.bbox)
                 region = tuple(parent) if parent is not None else None
+                _src = "detector-bubble"
                 if region is not None:
                     # The balloon's bbox, not an inset rectangle: the typesetter
                     # fits the lettering to the balloon's actual curve (`shapes`),
@@ -1798,9 +1800,14 @@ def render_translated_page(
                 # belongs to this column (see `_plausible_balloon` — the flood can
                 # escape a balloon whose outline has a gap).
                 cont = find_container(gray_page, b.bbox)
-                if cont is not None and _plausible_balloon(cont, b.bbox, region, page_w, page_h):
-                    region = tuple(cont)
-                    shaped.add(id(b))
+                _cont_note = "none"
+                if cont is not None:
+                    if _plausible_balloon(cont, b.bbox, region, page_w, page_h):
+                        region = tuple(cont)
+                        _src = "container"
+                        shaped.add(id(b))
+                    else:
+                        _cont_note = "rejected-implausible"
                 if region is None:
                     # A tall balloon with art drawn inside its lower half splits the
                     # white flood, so neither the detector nor find_container recovers
@@ -1811,12 +1818,19 @@ def render_translated_page(
                     gt = find_balloon_gap_tolerant(gray_page, b.bbox)
                     if gt is not None:
                         region = tuple(gt)
+                        _src = "gap-tolerant"
                         shaped.add(id(b))
                     else:
                         # Free text / caption: no bubble edge to avoid (see
                         # `_free_text_region` for the tall-narrow widening rule).
                         region = _free_text_region(b.bbox, page_w, page_h, gray=gray_page,
                                                    obstacles=_sibling_boxes(blocks, b) + claimed)
+                        _src = "caption-strip"
+                fitlog.record_region(b.bbox, _src, region,
+                                     {"detector_box": list(parent) if parent else None,
+                                      "container": list(cont) if cont else None,
+                                      "container_note": _cont_note,
+                                      "orientation": b.orientation})
             targets.append((b, region))
             claimed.append(tuple(int(v) for v in region))
             erase.extend(_erase_rects(gray_page, b.bbox))
@@ -1864,7 +1878,7 @@ def render_translated_page(
     regions = {id(b): region for b, region in targets if region is not None}
     emit("typeset")
     result = typeset_page(inpainted, blocks, font_id=font_id, regions=regions, only=only,
-                          shapes=shaped)
+                          shapes=shaped, page_label=image_path.split("/")[-1])
 
     # ---- paste carryover patches (previous page's bubble bottom halves) ------
     if carryover:

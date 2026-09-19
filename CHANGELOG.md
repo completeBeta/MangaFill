@@ -2,6 +2,36 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.27] - 2026-09-19
+
+### Fixed
+- **"Big balloon, tiny text": the fitter's own rule was throwing the size away.**
+  `typeset._fit_common` had a HARD exclusion for the stacked "word list" look
+  (3+ lines, nearly all single words). Bigger letters wrap to *fewer* words per line,
+  so that exclusion deleted precisely the largest candidates — and the fill
+  maximisation then ran only over the small ones. Measured on a 12-page sample
+  (176 blocks): **20% of blocks under-sized, mean +31%, worst +100%** — "That makes
+  three." lettered at **9px where 18px fitted**, and a 148x234 balloon holding 10px
+  text. On job-3 page 8 the smallest block was 10px and 2 blocks were under-sized.
+  The objective is now a single ordered rule: only sizes that FIT are candidates; the
+  chosen size may be at most **one step** below the largest that fits; inside that band
+  score by covered area, then fewest one-word lines, then size. Avoiding a stacked look
+  is worth at most one size step, not a third of the font. Page 8 measures
+  `size_min 10 -> 14`, `under_sized 2 -> 0`, with no outline crossings introduced.
+
+### Added
+- **Fit instrumentation (`app/pipeline/fitlog.py`), opt-in per container** via
+  `docker exec <container> touch /tmp/mf_typeset_debug`. Records per block the region
+  resolution branch, the shape profile, **every font size considered with its reject
+  reason**, and the chosen size vs the largest that fitted; plus a one-line per-page
+  summary to the app log (`FITLOG page=... blocks=... under_sized=... branches={...}`)
+  so the behaviour is visible in the Logs tab. Off by default (one `os.path.exists`
+  per page) and exception-proof: instrumentation must never break a render.
+- **Whole-job audit harness** (`mfqa/audit_fit.py`): ranks every block whose size fell
+  below the geometry by severity and exits non-zero on failure, so a release can be
+  gated on it. This is the objective check that replaces eyeballing pages — a 193-page
+  visual sweep missed the page-8 class entirely.
+
 ## [0.27.26] - 2026-09-19
 
 ### Fixed

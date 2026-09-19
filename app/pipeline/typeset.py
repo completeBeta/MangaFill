@@ -15,8 +15,14 @@ import math
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from . import fitlog
 from .fonts import resolve_font_path
 from .types import TextBlock
+
+# Result of the most recent `_fit_common` call, so `_draw_box` can log what the fitter
+# decided and why. The app is a single uvicorn worker and fits are serial, so a
+# module-level record is safe; it is only filled when `fitlog.enabled()`.
+_last_fit: dict = {}
 
 
 def _text_w(draw: ImageDraw.ImageDraw, text: str, font) -> int:
@@ -103,37 +109,44 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int) -> list[str]:
     return lines
 
 
-def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32):
+def _fit(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32,
+         ignore_wordlist: bool = False):
     """Best font size for `text` in the rectangle (max_w x max_h) — see `_fit_common`."""
-    return _fit_common(text, max_w, max_h, font_path, max_font)
-
+    return _fit_common(text, max_w, max_h, font_path, max_font,
+                       ignore_wordlist=ignore_wordlist)
 
 def _fit_common(text: str, max_w: int, max_h: int, font_path: str, max_font: int = 32,
-                avail=None, region_h: int | None = None):
-    """Largest font size whose wrapped text FITS the region — fill first.
+                avail=None, region_h: int | None = None, ignore_wordlist: bool = False):
+    """Best font size for `text` in a region — SIZE FIRST, taste second.
 
-    v0.27.15. The old rule was "largest size that fits *and* carries no lone-word
-    line", which picked a far-too-small size whenever a clean-looking wrapping
-    existed anywhere below the cap: audited on job 1, an "Ah" in a 133x138 bubble
-    lettered at 36 (13% fill), "I'm sorry, big sister-" in a 269x475 balloon at 25
-    (9%), and a vertical "Great fortune" in a 196x313 box at 14 (3%). The
-    lettering is judged on how it sits in the box, so:
+    v0.27.27. The objective is now a single ordered rule:
 
-      1. every size from `max_font` down to 8 that fits is scored by the area its
-         wrapped block covers (fill) and by how many one-word lines it has;
-      2. the largest fill wins;
-      3. among the sizes within 85% of that fill, the one with the FEWEST one-word
-         lines wins (ties -> larger size).
+      1. only sizes that FIT (the rectangle, and — with `avail` — the balloon's
+         outline row by row) are candidates;
+      2. `largest_fitting` is the biggest of those. The chosen size may be at most
+         **ONE step below it** (`floor`); nothing can make the lettering smaller;
+      3. inside that band, score by covered area (fill), then by fewest one-word
+         lines, then by size.
 
-    So a text that can fill the box does, and the "I / WAITED / IN LINE" look is
-    only kept away when a slightly smaller size removes it at little cost in fill.
-    `avail`/`region_h` (from `_region_avail`) additionally require every line to
-    stay inside a balloon's actual outline, row by row.
+    Why this replaces the previous rule: that one had a HARD exclusion for the
+    "word list" look (3+ lines, nearly all single words). Bigger letters wrap to
+    fewer words per line, so the exclusion deleted precisely the large candidates —
+    and the fill-maximisation then ran only over the small ones. Measured across a
+    12-page sample: **20% of blocks** were under-sized by this alone, mean **+31%**
+    (worst +100%): "That makes three." lettered at 9px where 18px fitted, and a
+    148x234 balloon holding 10px text. Avoiding a stacked look is worth at most one
+    size step, not a third of the font.
+
+    `ignore_wordlist` is retained for callers/tests but is now a no-op: the
+    word-list look is a tie-break inside the band, never a veto.
     """
     if max_w < 8 or max_h < 8:
         return None
+    _tracing = fitlog.enabled()
+    trace: list[dict] | None = [] if _tracing else None
     probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
     cands: list[tuple[float, int, int, tuple]] = []  # (fill, lone, size, (lines, font))
+    largest_fitting: int | None = None
     for size in range(max_font, 7, -1):
         font = ImageFont.truetype(font_path, size)
         sw = max(1, size // 8)
@@ -143,28 +156,40 @@ def _fit_common(text: str, max_w: int, max_h: int, font_path: str, max_font: int
             (0, 0), joined, font=font, spacing=2, align="center", stroke_width=sw
         )
         tw, th = bb[2] - bb[0], bb[3] - bb[1]
+        n = len(lines)
+        lone = sum(1 for ln in lines if len(ln.split()) == 1)
+        fill = (tw * th) / float(max(1, max_w * max_h))
+        # Geometry only. Everything that fits becomes a candidate — no taste veto.
         if tw > max_w or th > max_h:
-            continue
-        if avail is not None and not _lines_fit_shape(
+            reject = f"too_wide({int(tw)}>{max_w})" if tw > max_w else f"too_tall({int(th)}>{max_h})"
+        elif avail is not None and not _lines_fit_shape(
             probe, lines, font, avail, region_h or max_h, th
         ):
-            continue
-        fill = (tw * th) / float(max(1, max_w * max_h))
-        lone = sum(1 for ln in lines if len(ln.split()) == 1)
-        n = len(lines)
-        # A "word list" (three or more lines, nearly every one a single word —
-        # "I'm / sorry, / big / sister-") is the one lettering look that reads as
-        # broken, so those candidates are excluded. One-word lines in a 1-2 line
-        # block are ordinary comic lettering ("Great / fortune") and are allowed.
-        if n >= 3 and lone >= n - 1:
-            continue
-        cands.append((fill, lone, size, (lines, font)))
-    if not cands:
+            reject = "outside_shape"
+        else:
+            reject = None
+            if largest_fitting is None:
+                largest_fitting = size  # walked largest-first, so this is the max
+            cands.append((fill, lone, size, (lines, font)))
+        if trace is not None:
+            trace.append({"size": size, "n": n, "lone": lone, "tw": int(tw),
+                          "th": int(th), "fill": round(fill, 3), "reject": reject})
+    _last_fit.clear()
+    _last_fit.update({"table": trace, "largest_fitting": largest_fitting,
+                      "max_w": int(max_w), "max_h": int(max_h), "text": text,
+                      "avail_used": avail is not None, "chosen": None,
+                      "avail_max": int(avail.max()) if avail is not None else None,
+                      "avail_rows_usable": int((avail > 0).sum()) if avail is not None else None})
+    if not cands or largest_fitting is None:
         return None
-    top = max(c[0] for c in cands)
-    keep = [c for c in cands if c[0] >= 0.98 * top] or cands
+    # THE SIZE GUARANTEE: at most one step below the largest size that fits.
+    floor = max(8, largest_fitting - 1)
+    band = [c for c in cands if c[2] >= floor] or cands
+    top = max(c[0] for c in band)
+    keep = [c for c in band if c[0] >= 0.98 * top] or band
     keep.sort(key=lambda c: (c[1], -c[2]))
     fill, lone, size, (lines, font) = keep[0]
+    _last_fit["chosen"] = size
     return (size, lines, font)
 
 
@@ -251,7 +276,8 @@ def _lines_fit_shape(probe, lines: list[str], font, avail, region_h: int, th: in
     return True
 
 
-def _fit_shape(text: str, avail, region_h: int, font_path: str, max_font: int = 32):
+def _fit_shape(text: str, avail, region_h: int, font_path: str, max_font: int = 32,
+               ignore_wordlist: bool = False):
     """Largest font size whose wrapped lines all stay inside the balloon's shape.
 
     This is what lets lettering FILL a balloon without escaping it: the target is
@@ -264,7 +290,8 @@ def _fit_shape(text: str, avail, region_h: int, font_path: str, max_font: int = 
     if max_w < 12 or region_h < 8:
         return None
     return _fit_common(text, max_w, region_h, font_path, max_font,
-                       avail=avail, region_h=region_h)
+                       avail=avail, region_h=region_h,
+                       ignore_wordlist=ignore_wordlist)
 
 
 def _draw_box(
@@ -354,6 +381,21 @@ def _draw_box(
         _size, lines, font = fitted
 
     joined = "\n".join(lines)
+    # Phase 0 instrumentation (off unless the container was opted in): record what
+    # this block got vs the largest size that would have fitted, plus the full size
+    # table for blocks that under-sized. See `app/pipeline/fitlog.py`.
+    if fitlog.enabled():
+        _chosen = int(font.size) if fitted is not None else 8
+        fitlog.record_block(bbox, text, bbox,
+                            _last_fit.get("avail_max"),
+                            _last_fit.get("avail_rows_usable"),
+                            _last_fit.get("max_w", max_w),
+                            _last_fit.get("max_h", max_h),
+                            _chosen, _last_fit.get("largest_fitting"),
+                            bool(_last_fit.get("avail_used")), len(lines))
+        fitlog.record_candidates(_last_fit.get("table") or [], _chosen,
+                                 _last_fit.get("largest_fitting"), text,
+                                 bool(_last_fit.get("avail_used")))
     sw = max(1, font.size // 8)
 
     if abs(angle) < 3.0:
@@ -409,6 +451,7 @@ def typeset_page(
     regions: dict | None = None,
     only: set | None = None,
     shapes: set | None = None,
+    page_label: str = "?",
 ) -> Image.Image:
     """Draw every translatable block's English translation into a copy of `image`.
 
@@ -429,6 +472,7 @@ def typeset_page(
     """
     out = image.copy()
     draw = ImageDraw.Draw(out)
+    fitlog.set_page_label(page_label)
     fp = font_path or resolve_font_path(font_id)
     # Dynamic per-box lettering: each block is sized to its own box — the largest
     # font (capped at ~1/32 of page width) that fits, so a short line fills a big
@@ -469,4 +513,5 @@ def typeset_page(
                 # not on the (possibly looser) detection box
                 region = ebox
         _draw_box(out, draw, region, text, fp, bcap, angle=b.angle, avail=avail)
+    fitlog.end_page()
     return out
