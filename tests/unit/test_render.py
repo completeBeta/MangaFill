@@ -437,3 +437,63 @@ def test_merge_horizontal_words_keeps_separate_bubbles():
     ]
     merged = _merge_horizontal_words(boxes)
     assert len(merged) == 2
+
+
+# ---- v0.27.25: the lettering region must be the BALLOON, not the detector's box ----
+
+def test_plausible_balloon_accepts_a_real_balloon_larger_than_the_detector_box():
+    """Job-3 p12: the detector named a 204x311 box for a 307x413 balloon; the flood
+    result must be accepted (it contains the column and is not page-sized)."""
+    from app.pipeline.render import _plausible_balloon
+    text = (579, 88, 142, 256)
+    det = (560, 80, 204, 311)
+    assert _plausible_balloon((439, 71, 307, 413), text, det, 1125, 1600) is True
+
+
+def test_plausible_balloon_rejects_a_flood_that_escaped():
+    from app.pipeline.render import _plausible_balloon
+    text = (579, 88, 142, 256)
+    det = (560, 80, 204, 311)
+    assert _plausible_balloon((0, 0, 1125, 1600), text, det, 1125, 1600) is False
+    assert _plausible_balloon((0, 0, 1100, 1100), text, det, 1200, 1200) is False
+
+
+def test_plausible_balloon_rejects_a_box_not_containing_the_column():
+    from app.pipeline.render import _plausible_balloon
+    text = (579, 88, 142, 256)
+    det = (560, 80, 204, 311)
+    assert _plausible_balloon((100, 700, 300, 300), text, det, 1125, 1600) is False
+    assert _plausible_balloon((560, 80, 204, 200), text, det, 1125, 1600) is False
+
+
+def test_draw_box_fits_each_line_to_its_own_row_band():
+    """The v0.27.15 rectangle safety net must not override the shape fit when the
+    profile is clean. Job-3 p12's big ovals spilled past their outline because the
+    rectangle fit was preferred once the region became the real balloon."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+    from app.pipeline.fonts import resolve_font_path
+    from app.pipeline.typeset import _draw_box
+
+    W, H = 320, 260
+    img = Image.new("RGB", (W, H), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    # an oval profile: narrow at the top/bottom, widest at the middle
+    rows = np.arange(H)
+    half = (H - 1) / 2.0
+    avail = np.maximum(16, ((1.0 - np.abs(rows - half) / half) * (W - 24)).astype(int))
+
+    _draw_box(img, draw, (0, 0, W, H), "Several words of ordinary dialogue here.",
+              resolve_font_path(None), 44, angle=0.0, avail=avail)
+
+    ink = np.asarray(img.convert("L")) < 90
+    assert ink.any(), "nothing was lettered"
+    for r in range(H):
+        cols = np.where(ink[r])[0]
+        if len(cols) == 0:
+            continue
+        extent = cols.max() - cols.min() + 1
+        # each line must fit its own row band (small slack for the glyph outline)
+        assert extent <= avail[r] + 10, (
+            f"row {r}: lettering {extent}px wide exceeds the shape band {avail[r]}px"
+        )

@@ -2,6 +2,31 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [0.27.25] - 2026-09-19
+
+### Fixed
+- **Lettering was sized to the detector's bubble box instead of the balloon — the
+  English came out small with the balloon's lower half empty.** On job-3 page 12 the
+  detector named a 204x311 box for a balloon that is actually **307x413** — roughly
+  half the area — and the Japanese path lettered into that box and nothing else:
+  the font was capped by the smaller rectangle, and centring on it put the text high
+  in the balloon with a large empty gap below. The ko/zh path never had this problem
+  because it floods the white interior to find the real balloon; the ja path now does
+  the same. It floods the interior (`find_container`), and **prefers it when it
+  plausibly belongs to this text column** (`render._plausible_balloon`: the flood
+  must contain the column, not be page-sized, and not be wildly larger than the
+  detector's box — a flood escapes any balloon whose outline has a gap). Measured on
+  page 12: the account balloon went 204x311 -> 307x413 and the font grew accordingly,
+  and two balloons that had rendered **empty** now carry their text.
+- **Regression guard for the same page: lettering must not cross the outline.** With
+  the region now the real (larger) balloon, the v0.27.15 rectangle "safety net" in
+  `typeset._draw_box` began winning over the balloon-shape fit and pushed text across
+  the curved black outline. That net exists for a different failure — a *fragmented*
+  `avail` profile (art/lettering inside the balloon breaks the light region into
+  slivers) — so it now only applies when the profile really is fragmented
+  (`avail.max() < 0.6 * rect_w`). A clean profile keeps the outline-aware fit, which
+  fills the balloon without spilling.
+
 ## [0.27.24] - 2026-09-18
 
 ### Added

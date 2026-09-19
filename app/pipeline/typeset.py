@@ -332,10 +332,19 @@ def _draw_box(
         # than the inscribed rectangle (a 15% inset, the pre-v0.27.8 behaviour)
         # allows, so this can only ever grow the lettering, never shrink it.
         safe = max(int(min(w, h) * 0.15), 6)
-        rect = _fit(text, max(w - 2 * safe, 1), max(h - 2 * safe, 1), font_path,
-                    max_font=max_font)
-        if rect is not None and (fitted is None or rect[0] > fitted[0]):
-            fitted = rect
+        rect_w = max(w - 2 * safe, 1)
+        rect_h = max(h - 2 * safe, 1)
+        # Only reach for the rectangle when the shape profile is FRAGMENTED — the
+        # case this net actually exists for (lettering/art inside the balloon splits
+        # the light region, so `avail` reads 0 on many rows and the outline fit comes
+        # out far smaller than the balloon allows). When `avail` reaches most of the
+        # box width the outline fit is trustworthy, and forcing the rectangle there
+        # lets the lettering cross a curved outline: job-3 p12's big ovals spilled
+        # once the region became the real balloon instead of the detector's tight box.
+        if avail.max() < 0.6 * rect_w:
+            rect = _fit(text, rect_w, rect_h, font_path, max_font=max_font)
+            if rect is not None and (fitted is None or rect[0] > fitted[0]):
+                fitted = rect
     if fitted is None:
         fitted = _fit(text, max_w, max_h, font_path, max_font=max_font)
     if fitted is None:

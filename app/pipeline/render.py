@@ -1035,6 +1035,36 @@ def _drop_spurious_carryover(carryover: list, blocks: list) -> list:
     return [c for c in (carryover or []) if not any(_intersects(tuple(c[1]), ob) for ob in own)]
 
 
+def _plausible_balloon(cont, text_box: tuple, ref_box, page_w: int, page_h: int) -> bool:
+    """Is `cont` — a white-flood box — a believable balloon for `text_box`?
+
+    Used to decide whether to trust the flooded interior over the detector's own
+    bubble box. The flood escapes any balloon whose outline has a gap and can
+    swallow the whole panel, so require all of:
+
+      * it **contains** the text column (a couple of px of slack for detector slop);
+      * it is not page-sized (a leak);
+      * it is not wildly larger than the box the detector named (`ref_box`) — the
+        detector is often TIGHT (measured job-3 p12: 204x311 for a 307x413 balloon),
+        but a 10x jump means the flood ran away.
+
+    Job-3 p12 is the case this exists for: the detector's bubble box was ~half the
+    balloon's area, so the lettering was sized to the small box — a small font,
+    centred high, with the balloon's lower half left empty.
+    """
+    cx, cy, cw, ch = (int(v) for v in cont)
+    tx, ty, tw, th = (int(v) for v in text_box)
+    if cx > tx + 2 or cy > ty + 2 or cx + cw < tx + tw - 2 or cy + ch < ty + th - 2:
+        return False
+    if cw * ch > 0.55 * page_w * page_h:
+        return False
+    if ref_box is not None:
+        rx, ry, rw, rh = (int(v) for v in ref_box)
+        if cw * ch > 6.0 * max(1, rw * rh):
+            return False
+    return True
+
+
 def _free_text_region(bbox: tuple, page_w: int, page_h: int, gray=None,
                       obstacles=None) -> tuple:
     """Typeset region for free-floating text with no enclosing speech box.
@@ -1740,14 +1770,26 @@ def render_translated_page(
                 region = b.bbox
             else:
                 parent = find_parent_bubble(bubbles, b.bbox)
-                if parent is not None:
+                region = tuple(parent) if parent is not None else None
+                if region is not None:
                     # The balloon's bbox, not an inset rectangle: the typesetter
                     # fits the lettering to the balloon's actual curve (`shapes`),
                     # so a big round bubble is lettered to fill it while an oval or
                     # spiked one is never overrun.
-                    region = tuple(parent)
                     shaped.add(id(b))
-                else:
+                # The detector's bubble box is often much TIGHTER than the balloon it
+                # names — measured on job-3 p12 it was ~half the area (204x311 for a
+                # 307x413 balloon). Fitting the English into that small box forced a
+                # small font AND centred the text high in the balloon, leaving its
+                # lower half empty. Mirror the ko/zh path: flood the white interior
+                # to recover the real balloon, and prefer it when it plausibly
+                # belongs to this column (see `_plausible_balloon` — the flood can
+                # escape a balloon whose outline has a gap).
+                cont = find_container(gray_page, b.bbox)
+                if cont is not None and _plausible_balloon(cont, b.bbox, region, page_w, page_h):
+                    region = tuple(cont)
+                    shaped.add(id(b))
+                if region is None:
                     # A tall balloon with art drawn inside its lower half splits the
                     # white flood, so neither the detector nor find_container recovers
                     # it — and lettering the tight text box leaves the English
