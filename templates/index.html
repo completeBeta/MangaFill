@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manga Fill</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ version }}">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v={{ version }}">
+</head>
+<body>
+  <header>
+    <h1>Manga Fill</h1>
+    <span class="version">v{{ version }}</span>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="jobs">Jobs</button>
+    <button class="tab" data-tab="upload">Upload</button>
+    <button class="tab" data-tab="settings">Settings</button>
+    <button class="tab" data-tab="logs">Logs</button>
+  </nav>
+
+  <main>
+    <!-- Jobs -->
+    <section id="tab-jobs" class="panel active">
+      <div class="toolbar">
+        <h2>Jobs</h2>
+        <div class="toolbar-actions">
+          <button id="clear-all-jobs" class="btn danger small">Clear all</button>
+          <button id="refresh-jobs" class="btn">Refresh</button>
+        </div>
+      </div>
+      <div id="cost-tally" class="tally">
+        <div class="tally-row">
+          <span class="tally-label">Total cost</span>
+          <span id="tally-cost" class="tally-cost">—</span>
+          <select id="tally-period" title="Period the total cost covers">
+            <option value="day" selected>Day</option>
+            <option value="week">Week</option>
+            <option value="month">Month</option>
+            <option value="year">Year</option>
+          </select>
+          <span id="tally-window" class="muted tally-window"></span>
+        </div>
+        <div id="tally-detail" class="tally-detail muted"></div>
+      </div>
+      <div id="jobs-list" class="jobs-list">
+        <p class="muted">No jobs yet — upload some pages.</p>
+      </div>
+    </section>
+
+    <!-- Upload -->
+    <section id="tab-upload" class="panel">
+      <h2>Upload</h2>
+      <p class="muted">Single page, a batch of images, or a .cbz. Fully automatic — no review step.</p>
+      <form id="upload-form">
+        <div class="field">
+          <span>Files</span>
+          <div class="dropzone" id="upload-dropzone">
+            <input type="file" id="upload-files" class="dropzone-input"
+                   accept=".jpg,.jpeg,.png,.webp,.cbz,.zip" multiple required>
+            <div class="dropzone-inner">
+              <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 16V4"></path><path d="m7 9 5-5 5 5"></path>
+                <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"></path>
+              </svg>
+              <div class="dropzone-title">Drag &amp; drop your pages here</div>
+              <div class="dropzone-hint">or click to browse — .jpg .png .webp, or a .cbz / .zip. You can also paste an image straight from the clipboard (Ctrl/Cmd+V).</div>
+              <div class="dropzone-files" id="upload-filelist" aria-live="polite"></div>
+            </div>
+          </div>
+        </div>
+        <label class="field">
+          <span>Name (optional)</span>
+          <input type="text" id="upload-name" placeholder="e.g. chapter-42">
+        </label>
+        <label class="field">
+          <span>Model</span>
+          <select id="upload-model"></select>
+        </label>
+        <label class="field">
+          <span>Output mode</span>
+          <select id="upload-mode">
+            <option value="folder" selected>Folder (leave pages as-is)</option>
+            <option value="cbz">Re-assemble CBZ</option>
+            <option value="mirror">Mirror input format</option>
+          </select>
+        </label>
+        <button type="submit" class="btn primary">Start translation</button>
+      </form>
+      <div id="upload-status" class="muted"></div>
+    </section>
+
+    <!-- Settings -->
+    <section id="tab-settings" class="panel">
+      <h2>Settings</h2>
+      <div class="settings-form">
+        <div class="settings-section">
+          <div class="toolbar">
+            <h3>Models</h3>
+            <button id="model-add" class="btn small">+ Add model</button>
+          </div>
+          <div id="models-list" class="models-list"></div>
+          <div id="model-editor" class="model-editor hidden"></div>
+        </div>
+
+        <div class="settings-section">
+          <div class="toolbar">
+            <h3>Fonts</h3>
+            <span id="fonts-status" class="muted"></span>
+          </div>
+          <p class="muted">Lettering face for translated dialogue. Anime Ace (pulled at build) is the default manga look; the bundled OFL fonts are always-available fallbacks.</p>
+          <div id="fonts-list" class="fonts-list"></div>
+          <div id="fonts-note" class="warn"></div>
+        </div>
+
+        <div class="settings-section">
+          <div class="toolbar">
+            <h3>GPU</h3>
+            <span id="gpu-status-badge" class="badge muted">CPU only</span>
+          </div>
+          <p class="muted">Vision acceleration (detect / OCR / inpaint) runs on a local GPU when one is available, offloads to a remote GPU worker over HTTP, or falls back to CPU. Translation always stays on the cloud. <a href="https://github.com/completeBeta/MangaFill/blob/main/gpu-worker/SETUP_GUIDE.md" target="_blank" rel="noopener">GPU worker setup guide ↗</a></p>
+          <label class="field">
+            <span>Device (local)</span>
+            <select id="gpu-device">
+              <option value="auto">Auto — GPU if available, else CPU</option>
+              <option value="cuda">GPU (NVIDIA CUDA / AMD ROCm)</option>
+              <option value="cpu">CPU only</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>GPU worker URL (optional)</span>
+            <input type="text" id="gpu-worker-url" placeholder="e.g. http://gpu-host:9001">
+          </label>
+          <p class="muted" id="gpu-resolved"></p>
+          <div class="toolbar">
+            <button id="gpu-save" class="btn primary small">Save GPU settings</button>
+            <span id="gpu-status" class="muted"></span>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>General</h3>
+          <label class="field">
+            <span>Source language</span>
+            <select id="settings-source-lang">
+              <option value="auto">Auto-detect</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+              <option value="zh">Chinese</option>
+            </select>
+          </label>
+          <p class="muted">Auto-detect reads the first page to choose Japanese, Korean, or Chinese. Override it only if detection picks the wrong script.</p>
+          <label class="field">
+            <span>Default output mode</span>
+            <select id="settings-mode">
+              <option value="folder">Folder (leave pages as-is)</option>
+              <option value="cbz">Re-assemble CBZ</option>
+              <option value="mirror">Mirror input format</option>
+            </select>
+          </label>
+          <label class="field checkbox">
+            <input type="checkbox" id="settings-dry-run">
+            <span>Dry run (detect + OCR only — no translation, no cost)</span>
+          </label>
+
+          <h3 style="margin-top:20px">Translation provider</h3>
+          <label class="field">
+            <span>Request timeout (seconds)</span>
+            <input type="number" id="settings-llm-timeout" min="10" max="3600" step="10">
+          </label>
+          <p class="muted">How long a single translation request may take before it is aborted. Lax by default (300 s) — a degraded provider can answer slowly, and cutting off a slow-but-alive call throws the page away.</p>
+          <label class="field">
+            <span>Retries per request</span>
+            <input type="number" id="settings-llm-retries" min="0" max="10" step="1">
+          </label>
+          <p class="muted">Retried automatically on a transient provider error (timeout, connection failure, HTTP 429/5xx, empty completion), with increasing backoff. Default 2.</p>
+          <label class="field">
+            <span>Stop job after N consecutive failed pages</span>
+            <input type="number" id="settings-provider-fail-limit" min="1" max="50" step="1">
+          </label>
+          <p class="muted">When the provider is genuinely down, the job stops here and reports why, instead of running to the end leaving pages untranslated. Resume re-runs only the unfinished pages. Default 3.</p>
+          <label class="field">
+            <span>In-world captions on cover/credit pages</span>
+            <select id="settings-caption-vlm">
+              <option value="true">Read and translate them</option>
+              <option value="false">Leave them in Japanese</option>
+            </select>
+          </label>
+          <p class="muted">A page with no vertical dialogue (a cover, a credits or colophon page, or a splash page carrying a 【…】 name-tag) is normally left in Japanese, because those pages were damaged when they ran through erase + lettering. With this on, the configured model <em>reads the crop</em> and translates only in-world captions and name/role tags — a character's name or role shown beside them, which the commercial release does letter. Credits, titles and logos are still left exactly as they are, and so is any caption whose reading cannot be trusted (manga-ocr misreads this stylised text, so a garbled reading is never lettered). Costs one vision call per caption, only on those pages.</p>
+
+          <label class="field">
+            <span>Output language</span>
+            <select id="settings-target-lang"></select>
+          </label>
+          <p class="muted">English is the default. The list is the engine's own — every language it can render.</p>
+
+          <div class="toolbar">
+            <button id="settings-save" class="btn primary">Save settings</button>
+            <span id="settings-status" class="muted"></span>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="toolbar">
+            <h3>Engine</h3>
+            <span id="engine-status-badge" class="badge muted">not configured</span>
+          </div>
+          <p class="muted">
+            The translation pipeline itself (detect → OCR → inpaint → lettering) runs in the
+            engine — the upstream <em>manga-image-translator</em> service. This app is the shell
+            around it: jobs, queue, viewer, fonts, CBZ/PDF, logs. Leave the URL empty to use the
+            app's own built-in pipeline instead. One engine container per GPU type (CPU now;
+            CUDA / ROCm images are built from the same <code>engine/</code> folder).
+          </p>
+          <label class="field">
+            <span>Engine URL</span>
+            <input type="text" id="engine-url" placeholder="e.g. http://your-engine-host:8000">
+          </label>
+          <label class="field checkbox">
+            <input type="checkbox" id="engine-enabled">
+            <span>Use the engine for new jobs (off = built-in pipeline)</span>
+          </label>
+          <p class="muted" id="engine-resolved"></p>
+          <div class="toolbar">
+            <button id="engine-save" class="btn primary small">Save engine settings</button>
+            <button id="engine-test" class="btn small">Test connection</button>
+            <span id="engine-status" class="muted"></span>
+          </div>
+        </div>
+
+        <details class="settings-section" id="advanced-section">
+          <summary><h3>Advanced</h3><span class="muted">engine knobs — defaults match what this app has always used</span></summary>
+          <p class="muted">
+            These are the engine's own controls. Every value below is the fixed value the app used
+            before the engine existed, so nothing changes until you change it. Detector,
+            resolution, direction and inpainter are the engine's real options; the three fine
+            knobs are free numbers.
+          </p>
+          <label class="field">
+            <span>Second pass</span>
+            <select id="engine-second-pass"></select>
+          </label>
+          <p class="muted">
+            The engine only reports text it <b>translated</b>, so anything its detector misses —
+            the tail of a line, vertical Japanese — is never erased and stays visible under the
+            English. With the second pass <b>on</b>, this app's own detector finds those regions and
+            translates them too (a few blocks per page). It is skipped automatically when the host
+            is low on memory, and the reason is written to the job's log line.
+          </p>
+          <label class="field">
+            <span>Lettering</span>
+            <select id="engine-lettering"></select>
+          </label>
+          <p class="muted">
+            <b>Our typesetter</b> = the engine detects, reads and translates the page, and this
+            app draws the text with its own lettering — fitted to each balloon's outline and
+            filling it, which is the look this app was finished with. <b>Engine's own</b> lets
+            upstream render the whole page instead (its text sits in the detected box rather
+            than filling the shape).
+          </p>
+          <label class="field">
+            <span>Source-language presets</span>
+            <select id="engine-preset-mode"></select>
+          </label>
+          <p class="muted" id="engine-preset-note"></p>
+          <label class="field">
+            <span>Detector</span>
+            <select id="engine-detector"></select>
+          </label>
+          <label class="field">
+            <span>Detection resolution</span>
+            <select id="engine-detection-size"></select>
+          </label>
+          <label class="field">
+            <span>Render direction</span>
+            <select id="engine-render-direction"></select>
+          </label>
+          <label class="field">
+            <span>Inpainter</span>
+            <select id="engine-inpainter"></select>
+          </label>
+          <label class="field">
+            <span>Inpainting resolution</span>
+            <select id="engine-inpainting-size"></select>
+          </label>
+          <h4>Fine knobs</h4>
+          <label class="field">
+            <span>Box threshold</span>
+            <input type="number" id="engine-box-threshold" min="0" max="1" step="0.05">
+          </label>
+          <label class="field">
+            <span>Unclip ratio</span>
+            <input type="number" id="engine-unclip-ratio" min="1" max="5" step="0.1">
+          </label>
+          <label class="field">
+            <span>Mask dilation offset</span>
+            <input type="number" id="engine-mask-dilation" min="0" max="200" step="1">
+          </label>
+          <div class="toolbar">
+            <button id="advanced-save" class="btn primary small">Save advanced</button>
+            <button id="advanced-reset" class="btn small">Reset to defaults</button>
+            <span id="advanced-status" class="muted"></span>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- Logs -->
+    <section id="tab-logs" class="panel">
+      <div class="toolbar">
+        <h2>Logs</h2>
+        <label>File
+          <select id="logs-file" title="Which log surface to read">
+            <option value="mangafill" selected>mangafill (main)</option>
+            <option value="access">access (HTTP)</option>
+            <option value="lifecycle">lifecycle (state changes)</option>
+            <option value="engine">engine (upstream service)</option>
+            <option value="engine-calls">engine-calls (requests we make)</option>
+            <option value="errors">errors (warnings and failures)</option>
+          </select>
+        </label>
+        <label>Lines
+          <select id="logs-lines">
+            <option>100</option>
+            <option selected>200</option>
+            <option>500</option>
+            <option>1000</option>
+          </select>
+        </label>
+        <label class="checkbox"><input type="checkbox" id="logs-auto" checked> auto-refresh</label>
+        <button id="refresh-logs" class="btn">Refresh</button>
+        <a id="logs-download" class="btn" href="/api/logs?lines=100000" download="mangafill.log">Download</a>
+      </div>
+      <div id="logs-files" class="muted logs-files"></div>
+      <pre id="logs-view" class="logs"></pre>
+    </section>
+  </main>
+
+  <!-- Side-by-side viewer -->
+  <div id="viewer" class="viewer hidden">
+    <div class="viewer-bar">
+      <span id="viewer-title"></span>
+      <div class="viewer-nav">
+        <button id="viewer-prev" title="Previous page" aria-label="Previous page">◀ Prev</button>
+        <span class="viewer-jump">
+          <input id="viewer-page" type="number" min="1" step="1" inputmode="numeric"
+                 aria-label="Page number"
+                 title="Type a page number and press Enter to jump to it">
+          <span id="viewer-pos"></span>
+        </span>
+        <button id="viewer-next" title="Next page" aria-label="Next page">Next ▶</button>
+      </div>
+      <div class="viewer-actions">
+        <button id="viewer-rerender" title="Render just this page again with the current pipeline (use after a fix)">Re-render page</button>
+        <button id="viewer-close" title="Close viewer" aria-label="Close viewer">✕</button>
+      </div>
+    </div>
+    <div class="viewer-panes">
+      <figure><figcaption>Original</figcaption><img id="viewer-orig" alt="original"></figure>
+      <figure><figcaption>Translated</figcaption><img id="viewer-trans" alt="translated"></figure>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v={{ version }}"></script>
+</body>
+</html>

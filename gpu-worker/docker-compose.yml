@@ -1,0 +1,64 @@
+# Reference compose for the GPU worker — four flavours, pick one profile.
+#
+#   docker compose --profile nvidia up -d   # NVIDIA RTX 20/30/40/50 (default image)
+#   docker compose --profile pascal up -d   # NVIDIA Pascal (P2000 / GTX 10-series)
+#   docker compose --profile rocm   up -d   # AMD (RX 6000/7000/9000)
+#   docker compose --profile cpu     up -d   # no GPU
+#
+# Build each from its matching Dockerfile first:
+#   docker build -t mangafill-gpu:latest  .                       # NVIDIA RTX 20/30/40/50
+#   docker build -t mangafill-gpu:pascal -f Dockerfile.pascal .   # NVIDIA Pascal
+#   docker build -t mangafill-gpu:rocm   -f Dockerfile.rocm  .    # AMD
+#   docker build -t mangafill-gpu:cpu    -f Dockerfile.cpu   .    # CPU
+#
+# NVIDIA needs the `nvidia` runtime (Unraid: ich777 "Nvidia Driver" plugin).
+# AMD needs /dev/kfd + /dev/dri passthrough.
+
+services:
+  mangafill-gpu:
+    image: mangafill-gpu:latest
+    container_name: mangafill-gpu
+    profiles: ["nvidia"]
+    ports:
+      - "9001:9001"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    runtime: nvidia
+    restart: unless-stopped
+
+  mangafill-gpu-pascal:
+    image: mangafill-gpu:pascal
+    container_name: mangafill-gpu-pascal
+    profiles: ["pascal"]
+    ports:
+      - "9001:9001"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    runtime: nvidia
+    restart: unless-stopped
+
+  mangafill-gpu-rocm:
+    image: mangafill-gpu:rocm
+    container_name: mangafill-gpu-rocm
+    profiles: ["rocm"]
+    ports:
+      - "9001:9001"
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - render
+    security_opt:
+      - seccomp=unconfined
+    restart: unless-stopped
+
+  mangafill-gpu-cpu:
+    image: mangafill-gpu:cpu
+    container_name: mangafill-gpu-cpu
+    profiles: ["cpu"]
+    ports:
+      - "9001:9001"
+    restart: unless-stopped

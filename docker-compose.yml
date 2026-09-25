@@ -1,0 +1,22 @@
+services:
+  mangafill:
+    build: .
+    container_name: mangafill
+    ports:
+      - "8788:8788"
+    env_file:
+      - .env
+    environment:
+      # The engine's own stdout/stderr land in ../mangafill-engine/logs/engine.log via a
+      # shared volume (the engine container tees them there); the app reads that file
+      # read-only and serves it as the "engine" surface on the Logs page.
+      MANGA_FILL_ENGINE_LOGS_DIR: /data/engine-logs
+    volumes:
+      - ./data:/data
+      - ./uploads:/input
+      - ./config:/app/config
+      - ./hf-cache:/root/.cache/huggingface   # persist downloaded models (manga-ocr, detector, LaMa)
+      - ./paddlex-cache:/root/.paddlex        # persist PaddleOCR models (ko/zh PP-OCRv5/v6)
+      # Engine log surfaces (read-only: the engine container owns the file).
+      - ../mangafill-engine/logs:/data/engine-logs:ro
+    restart: unless-stopped

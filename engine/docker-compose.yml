@@ -1,0 +1,102 @@
+# Manga Fill ENGINE — one service per accelerator type (house rule: a container per GPU
+# type). Only the matching profile is ever started:
+#
+#   docker compose --profile cpu    up -d --build     # CPU testing (what we do today)
+#   docker compose --profile nvidia up -d --build     # NVIDIA host, needs nvidia runtime
+#   docker compose --profile rocm   up -d --build     # AMD host, needs /dev/kfd + /dev/dri
+#
+# Models live in ./models (mounted), NOT in the image: the first job for a language pulls
+# what it needs and then it is cached for every later job — and the same cache is reused
+# if we later move to a GPU host.
+name: mangafill-engine
+
+x-common: &common
+  restart: unless-stopped
+  ports:
+    - "8000:8000"
+  volumes:
+    - ./models:/app/upstream/models
+    - ./logs:/app/upstream/logs
+  environment:
+    - PYTHONUNBUFFERED=1
+  # Translator credentials live in ./engine/.env (NOT in git — see .gitignore):
+  #   DEEPSEEK_API_KEY=...        DEEPSEEK_API_BASE=https://api.deepseek.com/v1
+  #   OPENAI_API_KEY=...          GEMINI_API_KEY=...        GROQ_API_KEY=...
+  # Upstream reads keys from the environment, so the app's own model list is untouched —
+  # the engine is the thing that talks to the provider.
+  env_file:
+    - path: .env
+      required: false
+
+services:
+  engine-cpu:
+    <<: *common
+    profiles: ["cpu", "default"]
+    build:
+      context: .
+      args:
+        VARIANT: cpu
+    image: mangafill-engine:cpu
+    # CPU-only: no --use-gpu, and no accelerator devices are requested.
+    # stdout/stderr are TEE'd into logs/engine.log, which the app container mounts
+    # read-only at /data/engine-logs — that is how the engine's own warnings reach the
+    # app's Logs page ("engine" surface).
+    #
+    # --models-ttl=600: unload the models after 10 minutes idle. NOT cosmetic. On this host
+    # (7.9 GB, swap permanently full) the kernel OOM-killed the engine's child process
+    # (anon-rss 3.34 GB — see `dmesg`), after which the parent answered every request with
+    # "Translation service is starting up, please wait" and jobs failed until the container
+    # was restarted manually. Releasing the engine's memory when idle removes that standing
+    # risk; the cost is one model load after an idle gap. A GPU host with headroom does not
+    # need this — drop the flag there.
+    command:
+      - sh
+      - -c
+      - exec python -u server/main.py --host 0.0.0.0 --port 8000 --models-ttl=600 2>&1 | tee -a /app/upstream/logs/engine.log
+    healthcheck:
+      # Their API answers /queue-size; the probe must POST it (a GET returns 405).
+      test: ["CMD-SHELL", "curl -fsS -X POST http://127.0.0.1:8000/queue-size >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  engine-nvidia:
+    <<: *common
+    profiles: ["nvidia"]
+    build:
+      context: .
+      args:
+        VARIANT: nvidia
+    image: mangafill-engine:nvidia
+    command:
+      - sh
+      - -c
+      - exec python -u server/main.py --host 0.0.0.0 --port 8000 --use-gpu 2>&1 | tee -a /app/upstream/logs/engine.log
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  engine-rocm:
+    <<: *common
+    profiles: ["rocm"]
+    build:
+      context: .
+      args:
+        VARIANT: rocm
+    image: mangafill-engine:rocm
+    command:
+      - sh
+      - -c
+      - exec python -u server/main.py --host 0.0.0.0 --port 8000 --use-gpu 2>&1 | tee -a /app/upstream/logs/engine.log
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    security_opt:
+      - seccomp:unconfined

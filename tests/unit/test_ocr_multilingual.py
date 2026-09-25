@@ -1,0 +1,223 @@
+"""Unit tests for multi-language OCR routing + language detection.
+
+`detect_language` and `_reocr_rotated` are tested with `read_boxes_text` /
+`_pipeline` mocked — no PaddleOCR model load.
+
+The key regression guards:
+  * a real KANA count means Japanese (the ch probe alone decides — no korean probe);
+  * otherwise the korean probe runs, and HANGUL BEATS HANZI. The ch recognizer
+    reads Korean as plausible hanzi, so "hanzi present" must never decide on its
+    own: job 2 (a Korean manhwa) auto-detected as `zh` on 2026-09-15 and the
+    Chinese recognizer then read nothing, silently re-rendering pages back to
+    their untranslated originals;
+  * one stray kana character must not flip a Korean page to Japanese.
+"""
+from __future__ import annotations
+
+import numpy as np
+from PIL import Image
+
+import app.pipeline.ocr_multilingual as om
+
+
+def _img(w: int = 10, h: int = 10) -> Image.Image:
+    return Image.new("RGB", (w, h))
+
+
+def test_detect_language_chinese_rules_out_korean_then_returns_zh(monkeypatch):
+    """A Chinese page is probed with `ch` AND `ko`.
+
+    The korean probe is no longer skipped: hangul is the only positive Korean
+    marker, and it has to be checked before hanzi can be trusted (see the
+    job-2 mis-detection below). Measured on the real page, the korean model
+    emits no hangul for Chinese text, so the answer is still Chinese.
+    """
+    calls: list[str] = []
+
+    def fake_read(image, lang):
+        calls.append(lang)
+        if lang == "ch":
+            return [((0, 0, 30, 20), "你好世界", 0.95, 0.0)]
+        # the real ko probe on a Chinese page: punctuation junk, zero hangul
+        return [((0, 0, 30, 20), "—3!!,*", 0.79, 0.0)]
+
+    monkeypatch.setattr(om, "read_boxes_text", fake_read)
+    monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
+    assert om.detect_language(_img()) == "zh"
+    assert calls == ["ch", "ko"]
+
+
+def test_detect_language_korean_page_with_hanzi_garbage_is_korean(monkeypatch):
+    """THE 2026-09-15 BUG: the ch recognizer read a Korean page as hanzi.
+
+    Job 2 auto-detected as `zh` and every page came back untranslated (the
+    Chinese recognizer finds nothing in hangul), silently overwriting already
+    translated pages. Hangul from the korean probe must win over that garbage.
+    """
+    def fake_read(image, lang):
+        if lang == "ch":
+            return [((0, 0, 30, 20), "1T2 2卫 M亡ユ0.", 0.70, 0.0)]  # garbage hanzi
+        return [((0, 0, 30, 20), "한경백화점대한민국 매출 규모", 0.96, 0.0)]
+
+    monkeypatch.setattr(om, "read_boxes_text", fake_read)
+    monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
+    assert om.detect_language(_img()) == "ko"
+
+
+def test_detect_language_ignores_a_single_stray_kana(monkeypatch):
+    """One stray kana must not flip a Korean page to Japanese.
+
+    The real ch probe on job-2 page 2 returned exactly one katakana (ユ) amid
+    garbage; the old `has_kana(...) > 0` test would have called that Japanese.
+    """
+    def fake_read(image, lang):
+        if lang == "ch":
+            return [((0, 0, 30, 20), "1T2 2卫 M亡ユ0.", 0.70, 0.0)]  # 1 katakana
+        return [((0, 0, 30, 20), "뒤ㄹ말니고 씨는그야말로고급화의 상징.", 0.84, 0.0)]
+
+    monkeypatch.setattr(om, "read_boxes_text", fake_read)
+    monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
+    assert om.detect_language(_img()) == "ko"
+
+
+def test_detect_language_japanese_probes_ch_only(monkeypatch):
+    calls: list[str] = []
+
+    def fake_read(image, lang):
+        calls.append(lang)
+        return [((0, 0, 30, 20), "こんにちは", 0.95, 0.0)] if lang == "ch" else []
+
+    monkeypatch.setattr(om, "read_boxes_text", fake_read)
+    monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
+    assert om.detect_language(_img()) == "ja"
+    assert calls == ["ch"]
+
+
+def test_detect_language_korean_falls_back_to_korean_probe(monkeypatch):
+    """`ch` cannot read hangul, so a Korean page falls through to the korean
+    recognizer (and only then — never the other way around)."""
+    calls: list[str] = []
+
+    def fake_read(image, lang):
+        calls.append(lang)
+        if lang == "ch":
+            return []  # no CJK signal
+        return [((0, 0, 30, 20), "안녕하세요", 0.9, 0.0)]
+
+    monkeypatch.setattr(om, "read_boxes_text", fake_read)
+    monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
+    assert om.detect_language(_img()) == "ko"
+    assert calls == ["ch", "ko"]
+
+
+def test_detect_language_blank_defaults_to_japanese(monkeypatch):
+    calls: list[str] = []
+
+    def fake_read(image, lang):
+        calls.append(lang)
+        return []
+
+    monkeypatch.setattr(om, "read_boxes_text", fake_read)
+    monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
+    assert om.detect_language(_img()) == "ja"
+    assert calls == ["ch", "ko"]
+
+
+def test_detect_language_low_confidence_hanzi_not_chinese(monkeypatch):
+    """Hanzi read below the 0.4 confidence floor is not treated as Chinese."""
+    def fake_read(image, lang):
+        if lang == "ch":
+            return [((0, 0, 30, 20), "你好", 0.3, 0.0)]
+        return []
+
+    monkeypatch.setattr(om, "read_boxes_text", fake_read)
+    monkeypatch.setattr(om, "_drop", lambda *a, **k: None)
+    assert om.detect_language(_img()) == "ja"
+
+
+def test_reocr_rotated_upgrades_low_conf_vertical_read(monkeypatch):
+    """A weakly-read vertical column is re-read after a 90° rotation; the
+    higher-confidence rotated read wins, mapped back to the original box."""
+    class _FakePipeline:
+        def predict(self, _arr):
+            return [{
+                "dt_polys": [[[0, 0], [0, 10], [20, 10], [20, 0]]],
+                "rec_texts": ["HELLO"],
+                "rec_scores": [0.9],
+            }]
+
+    monkeypatch.setattr(om, "_pipeline", lambda lang: _FakePipeline())
+    arr = np.zeros((50, 50, 3), dtype=np.uint8)
+    text, conf = om._reocr_rotated(arr, 10, 10, 20, 40, "garbage", 0.2, "zh")
+    assert text == "HELLO"
+    assert conf == 0.9
+
+
+def test_reocr_rotated_keeps_original_when_rotated_read_is_worse(monkeypatch):
+    class _FakePipeline:
+        def predict(self, _arr):
+            return [{
+                "dt_polys": [[[0, 0], [0, 10], [20, 10], [20, 0]]],
+                "rec_texts": ["junk"],
+                "rec_scores": [0.1],
+            }]
+
+    monkeypatch.setattr(om, "_pipeline", lambda lang: _FakePipeline())
+    arr = np.zeros((50, 50, 3), dtype=np.uint8)
+    text, conf = om._reocr_rotated(arr, 10, 10, 20, 40, "orig", 0.2, "zh")
+    assert (text, conf) == ("orig", 0.2)  # 0.1 <= 0.2, so the original stays
+
+
+def test_reocr_rotated_skips_when_crop_too_small(monkeypatch):
+    # A tiny image makes the padded crop smaller than the 8px floor -> no rotate.
+    monkeypatch.setattr(om, "_pipeline", lambda lang: None)
+    arr = np.zeros((5, 5, 3), dtype=np.uint8)
+    text, conf = om._reocr_rotated(arr, 0, 0, 3, 4, "orig", 0.1, "zh")
+    assert (text, conf) == ("orig", 0.1)
+
+
+def test_poly_angle_sign_and_fold():
+    # Down-to-right slant (right end lower) -> positive.
+    assert 10 < om._poly_angle([[0, 0], [200, 40], [200, 70], [0, 30]]) < 13
+    # Up-to-right slant (right end higher) -> negative.
+    assert -13 < om._poly_angle([[0, 40], [200, 0], [200, 30], [0, 70]]) < -10
+    # Vertical text (tall-narrow quad) folds to ~0 — English stays horizontal.
+    assert abs(om._poly_angle([[0, 0], [20, 0], [20, 200], [0, 200]])) < 1.0
+
+
+def test_is_noise_box_drops_small_low_conf_keeps_small_high_conf():
+    # Foliage reads as single hanzi at LOW-moderate confidence -> noise.
+    assert om.is_noise_box(39, 42, 0.707) is True   # 业 leaf
+    assert om.is_noise_box(50, 51, 0.860) is True   # 义 leaf
+    assert om.is_noise_box(25, 28, 0.386) is True   # 水 texture
+    # Real small text reads HIGH confidence -> keep (this was the regression).
+    assert om.is_noise_box(49, 49, 0.949) is False  # 嗝 SFX
+    assert om.is_noise_box(49, 52, 1.000) is False  # lone 这
+    # Anything with a dimension >= floor is never noise, regardless of conf.
+    assert om.is_noise_box(63, 58, 0.5) is False    # 啊 SFX
+    assert om.is_noise_box(160, 146, 0.2) is False  # 啪 SFX
+    assert om.is_noise_box(220, 127, 0.1) is False  # 主人 dialogue
+    # Unknown confidence -> fail open (keep).
+    assert om.is_noise_box(30, 30, None) is False
+
+
+def test_read_boxes_text_drops_noise_boxes(monkeypatch):
+    # A foliage-sized LOW-confidence detection must never reach block-building,
+    # but a small HIGH-confidence one (real SFX) must survive.
+    class _FakePipeline:
+        def predict(self, _arr):
+            return [{
+                "dt_polys": [
+                    [[0, 0], [0, 200], [60, 200], [60, 0]],     # real vertical text
+                    [[900, 900], [900, 940], [940, 940], [940, 900]],  # leaf noise (low conf)
+                    [[500, 500], [500, 549], [549, 549], [549, 500]],  # 嗝 SFX (high conf)
+                ],
+                "rec_texts": ["问世间情为何物", "义", "嗝"],
+                "rec_scores": [0.99, 0.86, 0.95],
+            }]
+
+    monkeypatch.setattr(om, "_pipeline", lambda lang: _FakePipeline())
+    monkeypatch.setattr(om, "_reocr_rotated", lambda *a, **k: ("x", 0.5))
+    img = Image.new("RGB", (1000, 1000))
+    boxes = om.read_boxes_text(img, "zh")
+    assert [t for _b, t, _c, _a in boxes] == ["问世间情为何物", "嗝"]

@@ -1,0 +1,63 @@
+name: Publish app image
+
+# Builds the Manga Fill app image and pushes it to GitHub Container Registry
+# (ghcr.io). Runs on every `v*` tag push, or manually.
+#
+# Users then pull straight from Unraid / any Docker host without building:
+#   docker pull ghcr.io/completebeta/manga-fill-app:latest
+#
+# This is the CPU-first app container (torch CPU). GPU acceleration is NOT
+# baked in — the app reaches out to the separate GPU worker image
+# (ghcr.io/completebeta/manga-fill-gpu:<tag>) when `gpu_worker_url` is set, and
+# falls back to CPU otherwise. Model weights are downloaded at runtime into
+# /root/.cache/huggingface (mount a volume to persist them).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/completebeta/manga-fill-app
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: tags
+        run: |
+          FLOAT="${{ env.IMAGE }}:latest"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "tags=${FLOAT},${{ env.IMAGE }}:latest-v${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=${FLOAT}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
