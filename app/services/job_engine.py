@@ -341,7 +341,7 @@ def process_job(job_id: int) -> None:
                     else:
                         _progress("engine")
                         if engine_lettering == "ours":
-                            # ---- HYBRID (v0.30.0, option 1) -----------------
+                            # ---- HYBRID (v0.30.0, option 1) ---------------------------
                             # The engine detects + OCRs + translates; THIS app letters
                             # the result with its own typesetter, because that is the
                             # part that was already finished (text fitted to the balloon

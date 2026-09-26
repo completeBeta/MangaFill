@@ -2,6 +2,13 @@
 
 All notable changes to Manga Fill are documented here (Keep a Changelog format).
 
+## [Unreleased]
+
+### Changed
+- **Release hygiene** — publishing now runs an automated scan of the tree and of every added
+  line for internal infrastructure references (service names, addresses, host paths, operator
+  details, credentials), and the publish path refuses to push when it finds any.
+
 ## [0.30.7] - 2026-09-25
 
 ### Fixed
